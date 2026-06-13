@@ -1,4 +1,4 @@
-"""Registration field gating: privileged fields are inert; non-privileged pass."""
+"""Registration field gating: a strict allowlist - only opted-in fields persist."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ class DangerousRegister(BaseModel):
     username: str
     password: str
     full_name: str | None = None
+    role: str = "user"  # app-defined privileged column
     is_superuser: bool = False
     email_verified: bool = False
 
@@ -38,20 +39,39 @@ def test_allowlist_and_gated_sets_are_consistent() -> None:
     assert REGISTRATION_ALLOWED_FIELDS.isdisjoint(REGISTRATION_GATED_FIELDS)
 
 
-def test_filter_drops_privileged_keeps_passthrough(UserModel) -> None:
+def test_filter_allowlist_drops_unopted_and_privileged(UserModel) -> None:
+    # No extras opted in: only email/username survive. Real app columns
+    # (full_name, role) are dropped, as are all privileged logical fields.
     repo = UserRepository(UserModel)
     out = repo.filter_registration_data(
         {
             "email": "a@x.com",
             "username": "a",
-            "full_name": "A",  # non-logical passthrough
+            "full_name": "A",  # real column, NOT opted in -> dropped
+            "role": "admin",  # app-defined privileged column -> dropped
             "is_superuser": True,  # gated
             "email_verified": True,  # gated
             "hashed_password": "x",  # gated
             "id": 99,  # gated
         }
     )
+    assert out == {"email": "a@x.com", "username": "a"}
+
+
+def test_filter_keeps_opted_in_extra(UserModel) -> None:
+    repo = UserRepository(UserModel, register_extra_fields={"full_name"})
+    out = repo.filter_registration_data(
+        {"email": "a@x.com", "username": "a", "full_name": "A", "role": "admin"}
+    )
+    # only the opted-in column rides along; the un-opted role is still dropped
     assert out == {"email": "a@x.com", "username": "a", "full_name": "A"}
+
+
+def test_gated_field_cannot_be_opted_in(UserModel) -> None:
+    # Even if a developer mistakenly opts a privileged field in, it stays gated.
+    repo = UserRepository(UserModel, register_extra_fields={"is_superuser"})
+    out = repo.filter_registration_data({"email": "a@x.com", "username": "a", "is_superuser": True})
+    assert "is_superuser" not in out
 
 
 @pytest.fixture
@@ -62,6 +82,7 @@ async def client(get_session, UserModel):
         SECRET_KEY="x",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         register_schema=DangerousRegister,
+        register_extra_fields={"full_name"},  # opt in full_name, but NOT role
     )
     app = FastAPI()
     app.include_router(auth.router)
@@ -82,6 +103,7 @@ async def test_privilege_escalation_is_inert(client, sessionmaker, UserModel) ->
             "username": "evil",
             "password": "pw123456",
             "full_name": "Evil",
+            "role": "admin",
             "is_superuser": True,
             "email_verified": True,
         },
@@ -92,10 +114,48 @@ async def test_privilege_escalation_is_inert(client, sessionmaker, UserModel) ->
     async with sessionmaker() as db:
         user = await repo.get_by_email(db, "evil@x.com")
     assert user is not None
-    # privileged fields were dropped; passthrough kept
+    # privileged logical fields dropped, un-opted app column (role) dropped,
+    # opted-in column (full_name) kept
     assert user.is_superuser is False
     assert user.email_verified is False
+    assert user.role == "user"  # NOT "admin" - the mass-assignment is closed
     assert user.full_name == "Evil"
+
+
+async def test_app_column_not_settable_without_opt_in(get_session, UserModel, sessionmaker) -> None:
+    # Same dangerous schema, but NO register_extra_fields at all: full_name and
+    # role both drop, proving the secure default.
+    auth = CRUDAuth(
+        session=get_session,
+        user_model=UserModel,
+        SECRET_KEY="x",
+        transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+        register_schema=DangerousRegister,
+    )
+    app = FastAPI()
+    app.include_router(auth.router)
+    await auth.initialize()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        r = await c.post(
+            "/register",
+            json={
+                "email": "a@x.com",
+                "username": "a",
+                "password": "pw123456",
+                "full_name": "A",
+                "role": "admin",
+            },
+        )
+        assert r.status_code == 200, r.text
+    repo = UserRepository(UserModel)
+    async with sessionmaker() as db:
+        user = await repo.get_by_email(db, "a@x.com")
+    assert user is not None
+    assert user.role == "user"
+    assert user.full_name is None
+    await auth.shutdown()
 
 
 def test_warns_at_startup_when_schema_declares_gated_field(get_session, UserModel, caplog) -> None:
@@ -113,6 +173,26 @@ def test_warns_at_startup_when_schema_declares_gated_field(get_session, UserMode
     assert "email_verified" in msg
 
 
+def test_warns_when_real_column_not_opted_in(get_session, UserModel, caplog) -> None:
+    class WithName(BaseModel):
+        email: str
+        username: str
+        password: str
+        full_name: str | None = None
+
+    with caplog.at_level(logging.WARNING, logger="crudauth"):
+        CRUDAuth(
+            session=get_session,
+            user_model=UserModel,
+            SECRET_KEY="x",
+            transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+            register_schema=WithName,
+        )
+    # not a privileged field, but a real column that will silently drop -> warned
+    assert "register_extra_fields" in caplog.text
+    assert "full_name" in caplog.text
+
+
 def test_no_warning_for_clean_schema(get_session, UserModel, caplog) -> None:
     class CleanRegister(BaseModel):
         email: str
@@ -127,5 +207,7 @@ def test_no_warning_for_clean_schema(get_session, UserModel, caplog) -> None:
             SECRET_KEY="x",
             transports=[SessionTransport(cookies=CookieConfig(secure=False))],
             register_schema=CleanRegister,
+            register_extra_fields={"full_name"},  # opted in -> nothing to warn about
         )
     assert "privileged field" not in caplog.text
+    assert "will drop" not in caplog.text

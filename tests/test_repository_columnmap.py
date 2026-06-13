@@ -1,4 +1,4 @@
-"""Repository behavior under column_map (review fixes #1 canonicalization, #8 alias gate)."""
+"""Repository behavior under column_map: email canonicalization + alias gating."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ async def session():
     await engine.dispose()
 
 
-# --- #1: create() canonicalizes the *resolved* email column ------------------
+# --- create() canonicalizes the *resolved* email column ----------------------
 async def test_create_canonicalizes_email_under_column_map(session) -> None:
     repo = UserRepository(Account, column_map=COLUMN_MAP)
     user = await repo.create(
@@ -57,14 +57,14 @@ async def test_create_canonicalizes_email_under_column_map(session) -> None:
     assert repo.user_id(found) == repo.user_id(user)
 
 
-# --- #8: a column_map alias of a gated field is still dropped at registration -
+# --- a column_map alias of a gated field is still dropped at registration -----
 def test_filter_registration_data_closes_alias_hole() -> None:
-    repo = UserRepository(Account, column_map=COLUMN_MAP)
+    repo = UserRepository(Account, column_map=COLUMN_MAP, register_extra_fields={"full_name"})
     # `is_admin` is the mapped column name of the gated logical `is_superuser`
     out = repo.filter_registration_data(
         {"email": "a@x.com", "username": "a", "is_admin": True, "full_name": "ok"}
     )
-    assert "is_admin" not in out  # gated by resolved column name
+    assert "is_admin" not in out  # gated by resolved column name, even if opted in
     assert out == {"email": "a@x.com", "username": "a", "full_name": "ok"}
 
 

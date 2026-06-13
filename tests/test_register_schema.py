@@ -1,4 +1,4 @@
-"""Optional custom registration schema: extra fields are persisted (not required)."""
+"""Optional custom registration schema: opted-in extra fields persist (not required)."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ async def ctx(get_session, UserModel, sessionmaker):
         SECRET_KEY="x",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         register_schema=RegisterWithName,
+        register_extra_fields={"full_name"},
     )
     app = FastAPI()
     app.include_router(auth.router)

@@ -22,7 +22,8 @@ _ENROLLED_DETAIL = "If the email is available, check your inbox to finish signin
 
 class RegisterIn(BaseModel):
     """Default registration body. Supply your own via ``register_schema=`` to add
-    fields - any extra field that maps to a user column is persisted."""
+    fields - but an extra field is persisted only if its name is opted in via
+    ``register_extra_fields=``; otherwise registration drops it."""
 
     email: EmailStr
     username: str
@@ -54,17 +55,19 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
         Note:
             ``password`` is plaintext input (never a column) and is pulled out
             before gating, then hashed. [UserRepository.filter_registration_data][crudauth.repository.UserRepository.filter_registration_data]
-            then drops every privileged field (``is_superuser``, ``email_verified``,
-            ``hashed_password``, oauth linkage, ``id``, and their mapped column
-            names) - the security boundary that stops a (mis)declared
-            ``register_schema`` from setting privileged state. Non-logical extras
-            (e.g. ``full_name``) pass through; the repo keeps only real columns.
+            then keeps only the allowlisted fields (``email``/``username`` plus
+            any names opted in via ``register_extra_fields``) - the security
+            boundary that stops a (mis)declared ``register_schema`` from setting
+            privileged state or unknown app columns. Privileged fields
+            (``is_superuser``, ``email_verified``, ``hashed_password``, oauth
+            linkage, ``id``) are dropped unconditionally; app columns like
+            ``full_name`` are dropped unless opted in.
 
         Note:
             When email is configured, a brand-new and an already-registered email
             return the SAME ``202`` + body (the new user gets a verification mail,
             the owner of an existing address gets a notice) so the response can't
-            confirm whether an account exists (Convention 12). With no email
+            confirm whether an account exists. With no email
             channel, dev mode surfaces the duplicate instead - there's no way to
             both not-leak and tell a genuine new user. A username collision is
             always allowed to surface (public namespace).

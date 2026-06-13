@@ -92,6 +92,7 @@ class CRUDAuth:
         algorithm: str = DEFAULT_ALGORITHM,
         cookies: CookieConfig | None = None,
         register_schema: type[BaseModel] | None = None,
+        register_extra_fields: set[str] | None = None,
         rate_limiter: "RateLimiterBackend | None" = None,
         rate_limits: dict[str, RateLimit] | None = None,
         trusted_proxy_hops: int = 0,
@@ -119,8 +120,15 @@ class CRUDAuth:
             algorithm: JWT signing algorithm (default ``"HS256"``).
             cookies: App-wide [CookieConfig][crudauth.core.CookieConfig] (``secure`` /
                 ``samesite`` / ``path``); transports may override per-instance.
-            register_schema: Custom Pydantic body for ``/register``; extra
-                non-privileged columns are persisted, privileged ones dropped.
+            register_schema: Custom Pydantic body for ``/register``. By default
+                only ``email``/``username`` are persisted; any other field is
+                dropped unless its name is listed in ``register_extra_fields``.
+            register_extra_fields: App-defined model columns that ``/register``
+                is allowed to set (e.g. ``{"full_name", "locale"}``). Registration
+                is an allowlist: without opting a column in here it is dropped,
+                so adding a column to your model never silently becomes settable
+                at signup. crudauth's privileged fields (``is_superuser``,
+                ``email_verified``, ...) can never be opted in.
             rate_limiter: Backend for lockout/throttles; defaults to an in-process
                 [MemoryRateLimiterBackend][crudauth.ratelimit.backends.memory.MemoryRateLimiterBackend]. Use
                 ``redis_rate_limiter(...)`` in production.
@@ -140,10 +148,11 @@ class CRUDAuth:
         if not SECRET_KEY:
             raise ValueError("SECRET_KEY is required")
         self.session = session
-        self.repo = UserRepository(user_model, column_map)
+        self.repo = UserRepository(user_model, column_map, register_extra_fields)
         self.hooks = hooks or AuthHooks()
         self.transports: list[Transport] = list(transports) if transports else [SessionTransport()]
         self._register_schema = register_schema
+        self._warn_on_register_extra_fields(register_extra_fields)
         self._warn_on_privileged_register_fields(register_schema)
         self._rate_limits: dict[str, RateLimit] = {**DEFAULT_RATE_LIMITS, **(rate_limits or {})}
 
@@ -204,24 +213,54 @@ class CRUDAuth:
             fail_open=False,
         )
 
-    def _warn_on_privileged_register_fields(self, schema: type[BaseModel] | None) -> None:
-        """Warn loudly when a custom register schema declares a gated field.
+    def _warn_on_register_extra_fields(self, extra: set[str] | None) -> None:
+        """Warn when ``register_extra_fields`` tries to opt in a privileged field.
 
-        The field is still dropped at runtime (silently, so a prober learns
-        nothing) - but a schema declaring ``is_superuser`` is a developer
-        misconfiguration worth surfacing at startup.
+        Those names stay gated regardless (the repo drops them), so this is a
+        no-op for safety - but it's a developer misconfiguration worth surfacing.
+        """
+        if not extra:
+            return
+        gated = self.repo.gated_register_fields(extra)
+        if gated:
+            logger.warning(
+                "register_extra_fields lists privileged field(s) %s; these stay gated "
+                "and will NOT be settable at registration. Remove them.",
+                sorted(gated),
+            )
+
+    def _warn_on_privileged_register_fields(self, schema: type[BaseModel] | None) -> None:
+        """Warn when a custom register schema declares fields registration drops.
+
+        Two cases, both surfaced at startup so a silent drop never bites:
+
+        - **Privileged** fields (``is_superuser``, ``email_verified``, ...) are
+          dropped unconditionally - declaring one is a security-relevant mistake.
+        - **Real model columns** that aren't opted in via ``register_extra_fields``
+          are also dropped; the developer likely expected them to persist.
         """
         if schema is None:
             return
-        gated = self.repo.gated_register_fields(schema.model_fields.keys())
+        fields = schema.model_fields.keys()
+        gated = self.repo.gated_register_fields(fields)
         if gated:
             logger.warning(
                 "register_schema %s declares privileged field(s) %s that registration "
-                "will ignore. /register may only set %s plus your own non-privileged "
-                "columns; remove these from the schema.",
+                "will ignore. /register may only set %s plus columns you opt in via "
+                "register_extra_fields; remove these from the schema.",
                 schema.__name__,
                 sorted(gated),
                 sorted(REGISTRATION_ALLOWED_FIELDS),
+            )
+        droppable = self.repo.droppable_register_fields(fields)
+        if droppable:
+            logger.warning(
+                "register_schema %s declares field(s) %s that map to model columns but "
+                "are not opted in; registration will drop them. Add them to "
+                "register_extra_fields=%s to persist them.",
+                schema.__name__,
+                sorted(droppable),
+                sorted(droppable),
             )
 
     # --- backend detection ---------------------------------------------------

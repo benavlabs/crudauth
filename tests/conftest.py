@@ -16,9 +16,14 @@ class Base(DeclarativeBase):
 
 
 class User(Base, AuthUserMixin):
+    """Test user model with two app-defined columns outside crudauth's logical
+    contract: ``full_name`` (opt-in extra) and ``role`` (privileged, used to
+    exercise registration mass-assignment gating)."""
+
     __tablename__ = "users"
 
     full_name: Mapped[str | None] = mapped_column(default=None)
+    role: Mapped[str] = mapped_column(default="user")
 
 
 @pytest_asyncio.fixture
