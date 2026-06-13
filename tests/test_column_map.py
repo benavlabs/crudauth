@@ -46,7 +46,7 @@ async def client():
     auth = CRUDAuth(
         session=get_session,
         user_model=LegacyAccount,
-        SECRET_KEY="test-secret",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         column_map=COLUMN_MAP,
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )

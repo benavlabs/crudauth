@@ -48,7 +48,7 @@ async def ctx(get_session, UserModel, sessionmaker) -> AsyncIterator[tuple[Any, 
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="test-secret",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[
             SessionTransport(cookies=CookieConfig(secure=False)),
             ApiKeyTransport(keystore),

@@ -26,7 +26,7 @@ from crudauth.utils import (
     verify_password,
 )
 
-SECRET = "unit-secret"
+SECRET = "test-secret-key-0123456789-0123456789"
 
 
 def _request(headers: dict[str, str] | None = None, client_host: str = "10.0.0.1") -> Request:
@@ -140,7 +140,7 @@ def test_access_token_wrong_type_rejected() -> None:
 
 def test_token_wrong_secret_rejected() -> None:
     token = create_access_token({"sub": "42"}, SECRET)
-    assert verify_token(token, "other-secret", TokenType.ACCESS) is None
+    assert verify_token(token, "wrong-secret-key-0123456789-0123456789", TokenType.ACCESS) is None
 
 
 def test_expired_token_rejected() -> None:

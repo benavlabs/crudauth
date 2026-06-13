@@ -95,7 +95,7 @@ async def test_session_cookie_is_session_scoped_remember_me_is_persistent(
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[
             SessionTransport(
                 cookies=CookieConfig(secure=False), session_timeout_minutes=30, remember_me_days=30
@@ -240,7 +240,7 @@ async def test_open_redirect_blocked(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         oauth={"redir": OAuthCredentials(client_id="i", client_secret="s")},
         redirect_base_url="http://test",
@@ -326,7 +326,7 @@ async def test_register_does_not_leak_existing_email(get_session, UserModel) -> 
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         email=EmailConfig(sender=sender, frontend_url="https://app.example.com"),
     )
@@ -357,7 +357,7 @@ async def test_register_throttled(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -389,7 +389,7 @@ async def test_email_change_token_survives_race(sessionmaker, UserModel) -> None
     store = get_session_storage("memory", prefix="used:")
     svc = EmailFlowService(
         repo=repo,
-        secret_key="x",
+        secret_key="test-secret-key-0123456789-0123456789",
         config=EmailConfig(sender=sender, frontend_url="https://app"),
         hooks=AuthHooks(),
         token_store=store,
@@ -402,7 +402,12 @@ async def test_email_change_token_survives_race(sessionmaker, UserModel) -> None
         # someone else already owns the target email
         await repo.create(db, {"email": "taken@x.com", "username": "other", "hashed_password": "h"})
 
-    token = create_signed_token("x", uid, "change_email", extra_claims={"new_email": "taken@x.com"})
+    token = create_signed_token(
+        "test-secret-key-0123456789-0123456789",
+        uid,
+        "change_email",
+        extra_claims={"new_email": "taken@x.com"},
+    )
     async with sessionmaker() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.confirm_email_change(db, token)

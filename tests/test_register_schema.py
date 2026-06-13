@@ -22,7 +22,7 @@ async def ctx(get_session, UserModel, sessionmaker):
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         register_schema=RegisterWithName,
         register_extra_fields={"full_name"},
@@ -74,7 +74,7 @@ async def test_default_schema_still_works(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()

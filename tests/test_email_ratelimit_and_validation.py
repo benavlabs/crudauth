@@ -44,7 +44,7 @@ async def test_per_email_limit_is_silent(sessionmaker, UserModel) -> None:
     sender = Capture()
     svc = EmailFlowService(
         repo=repo,
-        secret_key="x",
+        secret_key="test-secret-key-0123456789-0123456789",
         config=EmailConfig(sender=sender, frontend_url="https://app"),
         hooks=AuthHooks(),
         rate_limiter=MemoryRateLimiterBackend(),
@@ -65,7 +65,7 @@ async def email_client(get_session, UserModel) -> AsyncIterator[httpx.AsyncClien
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         email=EmailConfig(sender=Capture(), frontend_url="https://app"),
         rate_limits={"password_reset_request": RateLimit(2, 3600)},
@@ -100,7 +100,7 @@ async def test_register_rejects_invalid_email(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -124,7 +124,7 @@ def test_session_rejects_samesite_none(get_session, UserModel) -> None:
         CRUDAuth(
             session=get_session,
             user_model=UserModel,
-            SECRET_KEY="x",
+            SECRET_KEY="test-secret-key-0123456789-0123456789",
             transports=[SessionTransport(cookies=CookieConfig(secure=True, samesite="none"))],
         )
 
@@ -136,6 +136,6 @@ def test_bearer_allows_samesite_none(get_session, UserModel) -> None:
     CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[BearerTransport(cookies=CookieConfig(secure=True, samesite="none"))],
     )

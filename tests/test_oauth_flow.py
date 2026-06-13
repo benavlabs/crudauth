@@ -53,7 +53,7 @@ async def client(get_session, UserModel):
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="test-secret",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         oauth={"stub": OAuthCredentials(client_id="id", client_secret="sec")},
         redirect_base_url="http://test",

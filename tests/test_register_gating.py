@@ -79,7 +79,7 @@ async def client(get_session, UserModel):
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         register_schema=DangerousRegister,
         register_extra_fields={"full_name"},  # opt in full_name, but NOT role
@@ -128,7 +128,7 @@ async def test_app_column_not_settable_without_opt_in(get_session, UserModel, se
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         register_schema=DangerousRegister,
     )
@@ -163,7 +163,7 @@ def test_warns_at_startup_when_schema_declares_gated_field(get_session, UserMode
         CRUDAuth(
             session=get_session,
             user_model=UserModel,
-            SECRET_KEY="x",
+            SECRET_KEY="test-secret-key-0123456789-0123456789",
             transports=[SessionTransport(cookies=CookieConfig(secure=False))],
             register_schema=DangerousRegister,
         )
@@ -184,7 +184,7 @@ def test_warns_when_real_column_not_opted_in(get_session, UserModel, caplog) -> 
         CRUDAuth(
             session=get_session,
             user_model=UserModel,
-            SECRET_KEY="x",
+            SECRET_KEY="test-secret-key-0123456789-0123456789",
             transports=[SessionTransport(cookies=CookieConfig(secure=False))],
             register_schema=WithName,
         )
@@ -204,7 +204,7 @@ def test_no_warning_for_clean_schema(get_session, UserModel, caplog) -> None:
         CRUDAuth(
             session=get_session,
             user_model=UserModel,
-            SECRET_KEY="x",
+            SECRET_KEY="test-secret-key-0123456789-0123456789",
             transports=[SessionTransport(cookies=CookieConfig(secure=False))],
             register_schema=CleanRegister,
             register_extra_fields={"full_name"},  # opted in -> nothing to warn about

@@ -13,7 +13,7 @@ def build_app(get_session, UserModel):
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="test-secret",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -127,7 +127,7 @@ async def test_login_lockout_returns_429(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="test-secret",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False), login_max_attempts=2)],
     )
     app = FastAPI()
@@ -157,7 +157,7 @@ async def test_login_lockout_not_bypassable_by_email_case(get_session, UserModel
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="test-secret",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False), login_max_attempts=2)],
     )
     app = FastAPI()

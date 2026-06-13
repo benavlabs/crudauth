@@ -135,7 +135,7 @@ async def test_rate_limit_dependency_raises_429(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -163,7 +163,7 @@ async def test_rate_limit_keyed_by_user(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -203,7 +203,7 @@ async def test_rate_limit_keyed_by_custom_callable(get_session, UserModel) -> No
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -231,7 +231,7 @@ async def test_rate_limit_disabled_with_times_zero(get_session, UserModel) -> No
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
