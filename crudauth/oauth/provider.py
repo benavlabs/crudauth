@@ -38,6 +38,14 @@ class AbstractOAuthProvider(ABC):
     with [OAuthProviderFactory][crudauth.oauth.factory.OAuthProviderFactory]. Set ``email_verified`` honestly -
     auto-linking to an existing account requires a verified provider email.
 
+    Note:
+        A custom provider named ``"gitlab"`` requires a ``gitlab_id`` column on
+        your user model (that's where its account id is stored and matched). Add
+        it to your model (or map it via ``column_map=``); [CRUDAuth][crudauth.crud_auth.CRUDAuth]
+        raises at startup if a configured provider has no ``{provider}_id``
+        column. Only ``google_id``/``github_id`` ship on
+        [AuthUserMixin][crudauth.models.mixin.AuthUserMixin].
+
     Example:
         ```python
         class GitLabOAuthProvider(AbstractOAuthProvider):
@@ -58,6 +66,7 @@ class AbstractOAuthProvider(ABC):
                 )
 
         OAuthProviderFactory.register_provider("gitlab", GitLabOAuthProvider)
+        # ...and add `gitlab_id` to your user model.
         ```
     """
 

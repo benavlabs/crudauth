@@ -103,6 +103,21 @@ async def test_authorize_sets_state_binding_cookie(client) -> None:
     assert "httponly" in set_cookie.lower()
 
 
+def test_oauth_provider_without_id_column_fails_fast(get_session, UserModel) -> None:
+    # A provider whose {name}_id column is missing on the model must raise at
+    # startup, not silently fail to persist/match the provider id at login.
+    OAuthProviderFactory.register_provider("gitlab", StubProvider)
+    with pytest.raises(ValueError, match="gitlab_id"):
+        CRUDAuth(
+            session=get_session,
+            user_model=UserModel,  # has google_id/github_id/stub_id, but no gitlab_id
+            SECRET_KEY="test-secret-key-0123456789-0123456789",
+            transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+            oauth={"gitlab": OAuthCredentials(client_id="i", client_secret="s")},
+            redirect_base_url="http://test",
+        )
+
+
 async def test_callback_requires_browser_bound_state(client) -> None:
     # browser A starts the flow: state stored server-side + binder cookie set on A
     r = await client.get("/oauth/stub/authorize?redirect_to=/dashboard")

@@ -142,8 +142,9 @@ class CRUDAuth:
                 header values. See [get_client_ip][crudauth.utils.get_client_ip].
 
         Raises:
-            ValueError: If ``SECRET_KEY`` is empty, or ``oauth`` is set without a
-                session transport / ``redirect_base_url``.
+            ValueError: If ``SECRET_KEY`` is empty; if ``oauth`` is set without a
+                session transport / ``redirect_base_url``; or if a configured
+                OAuth provider has no ``{provider}_id`` column on the user model.
         """
         if not SECRET_KEY:
             raise ValueError("SECRET_KEY is required")
@@ -310,6 +311,13 @@ class CRUDAuth:
 
         providers = {}
         for name, creds in oauth.items():
+            if not self.repo.has(f"{name}_id"):
+                raise ValueError(
+                    f"OAuth provider {name!r} needs a '{name}_id' column on the user model "
+                    f"to store and match its account id. Add it (e.g. "
+                    f"'{name}_id: Mapped[str | None] = mapped_column(unique=True, index=True, "
+                    f"default=None)') or map it via column_map=."
+                )
             redirect_uri = f"{redirect_base_url.rstrip('/')}/oauth/{name}/callback"
             providers[name] = OAuthProviderFactory.create_provider(
                 name,
