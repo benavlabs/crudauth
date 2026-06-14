@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from crudauth import CookieConfig, CRUDAuth, SessionTransport
+from crudauth.repository import UserRepository
 
 
 class RegisterWithName(BaseModel):
@@ -49,8 +50,6 @@ async def test_custom_field_persisted(ctx) -> None:
         },
     )
     assert r.status_code == 200, r.text
-
-    from crudauth.repository import UserRepository
 
     repo = UserRepository(UserModel)
     async with sessionmaker() as db:

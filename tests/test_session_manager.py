@@ -6,7 +6,9 @@ from starlette.requests import Request
 
 from crudauth.ratelimit import LockoutPolicy, MemoryRateLimiterBackend
 from crudauth.storage import MemorySessionStorage, get_session_storage
+from crudauth.storage.base import AbstractSessionStorage
 from crudauth.transports.session import SessionManager
+from crudauth.transports.session.constants import CSRF_TOKEN_ID_META_KEY
 from crudauth.transports.session.schemas import SessionData
 
 
@@ -40,9 +42,6 @@ async def test_create_and_validate() -> None:
 
 
 async def test_regenerate_csrf_rotates() -> None:
-    from crudauth.transports.session.constants import CSRF_TOKEN_ID_META_KEY
-    from crudauth.transports.session.schemas import SessionData
-
     mgr = build_manager()
     sid, old = await mgr.create_session(make_request(), user_id=1)
     assert await mgr.validate_csrf_token(sid, old) is True
@@ -129,8 +128,6 @@ async def test_minimal_backend_degrades_gracefully() -> None:
     # a BYO backend that implements only the core surface (no
     # get_user_sessions / scan_keys) must degrade - not crash - disabling
     # multi-device listing and the idle sweep rather than raising.
-    from crudauth.storage.base import AbstractSessionStorage
-
     class MinimalStorage(AbstractSessionStorage[SessionData]):
         def __init__(self) -> None:
             super().__init__()

@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from crudauth import (
     AuthHooks,
+    BearerTransport,
     CookieConfig,
     CRUDAuth,
     EmailConfig,
@@ -130,8 +131,6 @@ def test_session_rejects_samesite_none(get_session, UserModel) -> None:
 
 
 def test_bearer_allows_samesite_none(get_session, UserModel) -> None:
-    from crudauth import BearerTransport
-
     # bearer has no CSRF surface → SameSite=None is allowed (no raise)
     CRUDAuth(
         session=get_session,

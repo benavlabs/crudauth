@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -50,10 +51,8 @@ async def client():
         column_map=COLUMN_MAP,
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
-    app = __import__("fastapi").FastAPI()
+    app = FastAPI()
     app.include_router(auth.router)
-
-    from fastapi import Depends
 
     @app.get("/whoami")
     async def whoami(user: Principal = Depends(auth.current_user())):

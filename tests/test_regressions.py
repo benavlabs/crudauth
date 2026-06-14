@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
+from sqlalchemy.exc import IntegrityError
+from starlette.requests import Request
 
 from crudauth import (
     AuthHooks,
@@ -26,7 +29,10 @@ from crudauth.oauth import (
 )
 from crudauth.ratelimit import LockoutPolicy, MemoryRateLimiterBackend
 from crudauth.repository import UserRepository
+from crudauth.storage import get_session_storage
+from crudauth.transports.bearer.tokens import create_signed_token
 from crudauth.transports.session import SessionManager
+from crudauth.transports.session.schemas import SessionData
 from crudauth.utils import get_password_hash
 
 
@@ -296,8 +302,6 @@ async def test_register_integrityerror_recovers_cleanly(
     # (A true concurrent test isn't viable here: the conftest's in-memory SQLite
     # shares one connection via StaticPool, so two sessions corrupt each other's
     # transaction rather than isolating - an artifact of the test DB, not the code.)
-    from sqlalchemy.exc import IntegrityError
-
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
@@ -328,8 +332,6 @@ async def test_register_integrityerror_recovers_cleanly(
 # cleanup sweep does NOT wipe login-lockout state
 # =============================================================================
 async def test_cleanup_preserves_lockout() -> None:
-    from crudauth.storage import get_session_storage
-
     mgr = SessionManager(
         get_session_storage("memory", prefix="session:"),
         csrf_storage=get_session_storage("memory", prefix="csrf:"),
@@ -351,11 +353,6 @@ async def test_cleanup_preserves_lockout() -> None:
 # CSRF token slides forward with session activity
 # =============================================================================
 async def test_csrf_renews_with_session_activity() -> None:
-    from starlette.requests import Request
-
-    from crudauth.storage import get_session_storage
-    from crudauth.transports.session.schemas import SessionData
-
     mgr = SessionManager(
         get_session_storage("memory", prefix="session:", expiration=1800),
         csrf_storage=get_session_storage("memory", prefix="csrf:", expiration=1800),
@@ -444,9 +441,6 @@ async def test_register_throttled(get_session, UserModel) -> None:
 # confirm_email_change keeps the token if the target became taken
 # =============================================================================
 async def test_email_change_token_survives_race(sessionmaker, UserModel) -> None:
-    from crudauth.storage import get_session_storage
-    from crudauth.transports.bearer.tokens import create_signed_token
-
     repo = UserRepository(UserModel)
     sender = _Capture()
     store = get_session_storage("memory", prefix="used:")
@@ -476,6 +470,4 @@ async def test_email_change_token_survives_race(sessionmaker, UserModel) -> None
             await svc.confirm_email_change(db, token)
         assert exc.value.status_code == 422  # duplicate, not "token used"
     # the token was NOT consumed (so a fresh attempt with a free email could work)
-    import hashlib
-
     assert not await store.exists(hashlib.sha256(token.encode()).hexdigest())

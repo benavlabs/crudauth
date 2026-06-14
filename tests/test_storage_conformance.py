@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
+import fakeredis.aioredis
 import pytest
 
 from crudauth.storage.backends.memory import MemorySessionStorage
@@ -12,8 +14,6 @@ from crudauth.transports.session.schemas import SessionData
 
 
 def _fakeredis_client():
-    import fakeredis.aioredis
-
     return fakeredis.aioredis.FakeRedis()
 
 
@@ -94,8 +94,6 @@ async def test_set_if_absent_first_wins(storage) -> None:
 
 
 async def test_set_if_absent_concurrent_single_winner(storage) -> None:
-    import asyncio
-
     results = await asyncio.gather(
         *[storage.set_if_absent("race", SessionData(user_id=i), expiration=50) for i in range(20)]
     )
@@ -111,8 +109,6 @@ async def test_get_and_delete_returns_then_removes(storage) -> None:
 
 
 async def test_get_and_delete_concurrent_single_consumer(storage) -> None:
-    import asyncio
-
     await storage.create(SessionData(user_id=5), session_id="once")
     results = await asyncio.gather(
         *[storage.get_and_delete("once", SessionData) for _ in range(20)]

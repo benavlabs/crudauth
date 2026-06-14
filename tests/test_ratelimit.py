@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import AsyncIterator
 
+import fakeredis.aioredis
 import httpx
 import pytest
 from fastapi import Depends, FastAPI
@@ -15,13 +18,13 @@ from crudauth.ratelimit import (
     MemoryRateLimiterBackend,
     RateLimit,
     RedisBackend,
+    redis_rate_limiter,
 )
 from crudauth.ratelimit.base import RateLimiterBackend
+from crudauth.ratelimit.constants import MEMORY_SWEEP_EVERY_INCREMENTS
 
 
 def _fakeredis_client():
-    import fakeredis.aioredis
-
     return fakeredis.aioredis.FakeRedis()
 
 
@@ -61,14 +64,10 @@ async def test_ping(backend) -> None:
 async def test_memory_backend_evicts_abandoned_window_keys() -> None:
     # rolling window-stamped keys are never re-touched; the periodic sweep
     # must evict them so a high-cardinality keyspace can't grow unbounded.
-    import time as _time
-
-    from crudauth.ratelimit.constants import MEMORY_SWEEP_EVERY_INCREMENTS
-
     b = MemoryRateLimiterBackend()
     for i in range(300):  # simulate abandoned, already-expired window keys
         b._counts[f"old:{i}"] = 1
-        b._deadline[f"old:{i}"] = _time.monotonic() - 1
+        b._deadline[f"old:{i}"] = time.monotonic() - 1
     for _ in range(MEMORY_SWEEP_EVERY_INCREMENTS):  # drive the periodic sweep
         await b.increment("live", 1, 100)
     assert not any(k.startswith("old:") for k in b._counts)  # stale keys gone
@@ -251,8 +250,6 @@ async def test_rate_limit_disabled_with_times_zero(get_session, UserModel) -> No
 
 # --- memory-backend startup warning -----------------------------------------
 def test_warns_on_memory_backend_by_default(get_session, UserModel, caplog) -> None:
-    import logging
-
     with caplog.at_level(logging.WARNING, logger="crudauth"):
         CRUDAuth(
             session=get_session,
@@ -264,8 +261,6 @@ def test_warns_on_memory_backend_by_default(get_session, UserModel, caplog) -> N
 
 
 def test_memory_warning_silenced_by_flag(get_session, UserModel, caplog) -> None:
-    import logging
-
     with caplog.at_level(logging.WARNING, logger="crudauth"):
         CRUDAuth(
             session=get_session,
@@ -278,12 +273,6 @@ def test_memory_warning_silenced_by_flag(get_session, UserModel, caplog) -> None
 
 
 def test_no_memory_warning_with_redis_backends(get_session, UserModel, caplog) -> None:
-    import logging
-
-    import fakeredis.aioredis
-
-    from crudauth.ratelimit import redis_rate_limiter
-
     limiter = redis_rate_limiter(client=fakeredis.aioredis.FakeRedis())
     with caplog.at_level(logging.WARNING, logger="crudauth"):
         CRUDAuth(
