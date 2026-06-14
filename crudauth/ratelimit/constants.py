@@ -14,6 +14,11 @@ LOCKOUT_NAMESPACE = "login"
 # Namespace for the per-endpoint ``rate_limit()`` dependency keys.
 RATE_LIMIT_NAMESPACE = "ratelimit"
 
+# Sudo-lockout keys live under this namespace (``sudo:fail:<uid>`` /
+# ``sudo:lock:<uid>``), kept separate from the ``login`` lockout so a sudo
+# brute force can't reset login counters or vice versa.
+SUDO_NAMESPACE = "sudo"
+
 # Default Redis key prefix for the redis backend.
 REDIS_KEY_PREFIX = "crudauth:rl:"
 

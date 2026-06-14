@@ -18,6 +18,7 @@ __all__ = [
     "UnprocessableEntityException",
     "DuplicateValueException",
     "RateLimitException",
+    "SudoLockoutError",
     "CSRFException",
 ]
 
@@ -78,6 +79,23 @@ class RateLimitException(CustomException):
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=detail,
             headers=merged or None,
+        )
+
+
+class SudoLockoutError(CustomException):
+    """Raised when too many wrong-password sudo attempts lock re-authentication.
+
+    Distinct from [RateLimitException][crudauth.exceptions.RateLimitException]
+    (its own ``sudo:*`` counter, separate from login lockout) but shares the
+    429 + ``Retry-After`` shape.
+    """
+
+    def __init__(self, detail: str | None = None, retry_after: int | None = None):
+        headers = {"Retry-After": str(retry_after)} if retry_after is not None else None
+        super().__init__(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=detail,
+            headers=headers,
         )
 
 

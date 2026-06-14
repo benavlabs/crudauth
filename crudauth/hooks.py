@@ -56,6 +56,7 @@ class AuthHooks:
     on_after_email_verified: Hook | None = None
     on_after_password_reset: Hook | None = None
     on_after_email_changed: Hook | None = None
+    on_after_sudo: Hook | None = None
 
     async def run_after_register(self, user: dict, *, db: Any, context: HookContext) -> None:
         if self.on_after_register is not None:
@@ -80,3 +81,7 @@ class AuthHooks:
     async def run_after_email_changed(self, user: dict, *, db: Any, context: HookContext) -> None:
         if self.on_after_email_changed is not None:
             await _maybe_await(self.on_after_email_changed(user, db=db, context=context))
+
+    async def run_after_sudo(self, user: dict, *, request: Any, context: HookContext) -> None:
+        if self.on_after_sudo is not None:
+            await _maybe_await(self.on_after_sudo(user, request=request, context=context))

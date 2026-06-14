@@ -19,3 +19,6 @@ CSRF_STORAGE_PREFIX = "csrf:"
 # Session-metadata keys.
 REMEMBER_ME_META_KEY = "remember_me"
 CSRF_TOKEN_ID_META_KEY = "csrf_token_id"
+# Absolute (ISO-8601) instant a sudo elevation expires; absent/past means not
+# elevated. Stored on the session so it dies with the session (logout clears it).
+SUDO_ELEVATED_UNTIL_META_KEY = "sudo_elevated_until"

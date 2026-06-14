@@ -24,6 +24,7 @@ from crudauth.utils import (
     get_client_ip,
     get_password_hash,
     make_unusable_password,
+    mask_email,
     verify_password,
 )
 
@@ -61,6 +62,14 @@ def test_unusable_password_never_verifies() -> None:
 def test_canonical_email() -> None:
     assert canonical_email("  Foo@X.com ") == "foo@x.com"
     assert canonical_email(None) is None
+
+
+def test_mask_email() -> None:
+    assert mask_email("john@example.com") == "j***@example.com"
+    assert mask_email("ab@x.io") == "a***@x.io"
+    assert mask_email("a@x.io") == "a***@x.io"  # single-char local doesn't leak more
+    assert mask_email("not-an-email") == "***"
+    assert mask_email("") == "***"
 
 
 def test_long_password_not_truncated_at_72_bytes() -> None:

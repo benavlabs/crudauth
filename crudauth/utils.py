@@ -19,6 +19,7 @@ __all__ = [
     "is_unusable_password",
     "canonical_email",
     "canonical_identifier",
+    "mask_email",
     "get_client_ip",
 ]
 
@@ -113,6 +114,29 @@ def canonical_email(email: str | None) -> str | None:
     if email is None:
         return None
     return email.strip().lower()
+
+
+def mask_email(email: str) -> str:
+    """Mask an email for display: ``john@example.com`` -> ``j***@example.com``.
+
+    A display helper for shoulder-surfing / casual logs - **not** a security
+    control (it's obfuscation, not a guarantee). Returns ``"***"`` when there's
+    no ``@``; keeps only the first local-part character (so a single-char local
+    part can't leak more than that one character).
+
+    Example:
+        ```python
+        mask_email("john@example.com")  # "j***@example.com"
+        mask_email("a@x.io")            # "a***@x.io"
+        mask_email("not-an-email")      # "***"
+        ```
+    """
+    if not email or "@" not in email:
+        return "***"
+    local, domain = email.split("@", 1)
+    if len(local) <= 1:
+        return f"{local}***@{domain}"
+    return f"{local[0]}***@{domain}"
 
 
 def canonical_identifier(identifier: str) -> str:

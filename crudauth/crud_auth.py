@@ -51,6 +51,7 @@ from .ratelimit import (
 from .ratelimit.constants import RATE_LIMIT_NAMESPACE
 from .repository import REGISTRATION_ALLOWED_FIELDS, UserRepository
 from .storage import get_session_storage
+from .sudo import SudoConfig, SudoManager
 from .storage.constants import BACKEND_MEMORY
 from .transports.bearer.transport import BearerTransport
 from .transports.session.transport import SessionTransport
@@ -107,6 +108,7 @@ class CRUDAuth:
         rate_limiter: "RateLimiterBackend | None" = None,
         rate_limits: dict[str, RateLimit] | None = None,
         trusted_proxy_hops: int = 0,
+        sudo: SudoConfig | None = None,
         warn_on_memory_backend: bool = True,
     ):
         """Configure the auth surface.
@@ -152,6 +154,10 @@ class CRUDAuth:
                 proxies you control (e.g. ``1`` behind a single nginx/Caddy) so
                 the real client IP is read without trusting attacker-supplied
                 header values. See [get_client_ip][crudauth.utils.get_client_ip].
+            sudo: Enable sudo mode (short-lived re-authentication for sensitive
+                actions) with this [SudoConfig][crudauth.sudo.SudoConfig]. Requires
+                a session transport - elevation is stamped on the server-side
+                session. Exposes ``auth.sudo`` and ``auth.require_sudo()``.
             warn_on_memory_backend: Log a startup warning when an in-memory
                 backend is active (the zero-config default). In-memory state is
                 per-process, so under multiple workers it silently breaks; set
@@ -159,9 +165,10 @@ class CRUDAuth:
                 dev).
 
         Raises:
-            ValueError: If ``SECRET_KEY`` is empty; if ``oauth`` is set without a
-                session transport / ``redirect_base_url``; or if a configured
-                OAuth provider has no ``{provider}_id`` column on the user model.
+            ValueError: If ``SECRET_KEY`` is empty; if ``oauth`` or ``sudo`` is
+                set without a session transport (and ``oauth`` also needs
+                ``redirect_base_url``); or if a configured OAuth provider has no
+                ``{provider}_id`` column on the user model.
         """
         if not SECRET_KEY:
             raise ValueError("SECRET_KEY is required")
@@ -191,6 +198,10 @@ class CRUDAuth:
         self.runtime.lockout = self._build_lockout(self._session_transport)
         for transport in self.transports:
             transport.bind(self.runtime)
+
+        self.sudo: SudoManager | None = None
+        if sudo is not None:
+            self._build_sudo(sudo)
 
         self._email_service: EmailFlowService | None = None
         self._email_token_store: AbstractSessionStorage[Any] | None = None
@@ -385,6 +396,21 @@ class CRUDAuth:
             default_redirect=redirect_base_url,
         )
 
+    # --- sudo wiring ---------------------------------------------------------
+    def _build_sudo(self, config: SudoConfig) -> None:
+        if self._session_transport is None:
+            raise ValueError(
+                "Sudo stamps the elevation on a server-side session; add a "
+                "SessionTransport to transports=[...]."
+            )
+        self.sudo = SudoManager(
+            session_manager=self.sessions,
+            repo=self.repo,
+            backend=self.runtime.rate_limiter,
+            hooks=self.hooks,
+            config=config,
+        )
+
     # --- the current_user() factory -----------------------------------------
     async def _resolve_principal(
         self, request: Request, db: Any, selected: list[Transport]
@@ -482,6 +508,39 @@ class CRUDAuth:
                     result = await result
                 if result is False:
                     raise ForbiddenException("Access denied")
+            return principal
+
+        return dependency
+
+    def require_sudo(self) -> Callable[..., Any]:
+        """Build a dependency that requires a current sudo elevation.
+
+        Authenticates like [current_user][crudauth.crud_auth.CRUDAuth.current_user]
+        (reusing the per-request principal cache) and then demands an unexpired
+        sudo stamp, raising 403 otherwise. Compose it with ``current_user`` gates
+        on the same route to also enforce identity/role:
+
+        Example:
+            ```python
+            @app.post("/account/close")
+            async def close(
+                user: Principal = Depends(auth.current_user(superuser=True)),
+                _: Principal = Depends(auth.require_sudo()),
+            ):
+                ...
+            ```
+
+        Raises:
+            RuntimeError: If sudo isn't configured (pass ``sudo=SudoConfig()``).
+        """
+        if self.sudo is None:
+            raise RuntimeError("Sudo is not configured; pass sudo=SudoConfig() to CRUDAuth.")
+        sudo = self.sudo
+        user_dep = self.current_user()
+
+        async def dependency(principal: Annotated[Principal, Depends(user_dep)]) -> Principal:
+            if not await sudo.is_elevated(principal):
+                raise ForbiddenException("Re-authentication required.")
             return principal
 
         return dependency
