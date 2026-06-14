@@ -123,3 +123,12 @@ async def test_create_user_retries_on_integrity_error(sessionmaker, UserModel) -
     assert created is True
     assert repo.create_calls == 2  # first raced, retried with a random username
     assert repo.user_id(user) is not None
+
+
+def test_google_authorize_url_has_no_forced_offline_consent() -> None:
+    # crudauth never uses a refresh token, so Google's authorize URL must not
+    # force access_type=offline / prompt=consent (would re-prompt every login).
+    prov = GoogleOAuthProvider("id", "sec", "https://app/cb")
+    url = prov.get_authorization_url()["url"]
+    assert "access_type" not in url
+    assert "prompt=consent" not in url

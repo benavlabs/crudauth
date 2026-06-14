@@ -347,7 +347,7 @@ class SessionManager:
         Note:
             The session cookie is ``httponly`` but the CSRF cookie is NOT - it
             must be readable by JS so the SPA can echo it in the ``X-CSRF-Token``
-            header (the double-submit check). Do not make it ``httponly``.
+            header (the synchronizer-token check). Do not make it ``httponly``.
         """
         response.set_cookie(
             key=self.session_cookie_name,

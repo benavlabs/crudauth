@@ -22,6 +22,10 @@ PKCE_VERIFIER_BYTES = 64
 # flow, so a callback URL captured by an attacker can't log a victim in.
 OAUTH_STATE_COOKIE_NAME = "oauth_state"
 
+# Network timeout (seconds) for OAuth token-exchange / userinfo HTTP calls, so a
+# hung provider can't stall a request indefinitely.
+OAUTH_HTTP_TIMEOUT_SECONDS = 10
+
 # Google endpoints + default scopes.
 GOOGLE_AUTHORIZE_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"

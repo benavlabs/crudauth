@@ -54,6 +54,10 @@ class BearerTransport(Transport):
             A client's requested scopes are intersected with this set, so a
             client cannot self-grant a scope it asks for. Defaults to
             ``default_scopes`` (clients may only narrow, never widen).
+        refresh_cookie_path: ``Path`` for the refresh cookie. Defaults to the
+            cookie policy's path (``/``); set it to the refresh endpoint's path
+            (e.g. ``"/auth/refresh"``) to stop the cookie riding every request
+            and narrow its exposure. Must match where ``/refresh`` is mounted.
 
     Note:
         Issued scopes are **clamped** to ``grantable_scopes`` - the password
@@ -96,6 +100,7 @@ class BearerTransport(Transport):
         default_scopes: list[str] | None = None,
         grantable_scopes: list[str] | None = None,
         refresh_cookie_name: str = REFRESH_TOKEN_NAME,
+        refresh_cookie_path: str | None = None,
         cookies: CookieConfig | None = None,
     ):
         if refresh not in REFRESH_LOCATIONS:
@@ -112,6 +117,7 @@ class BearerTransport(Transport):
         if not set(self.default_scopes) <= self.grantable_scopes:
             raise ValueError("default_scopes must be a subset of grantable_scopes")
         self.refresh_cookie_name = refresh_cookie_name
+        self.refresh_cookie_path = refresh_cookie_path
         self._cookie_override = cookies
 
     # --- authn ---------------------------------------------------------------
@@ -287,7 +293,7 @@ class BearerTransport(Transport):
                 secure=cookies.secure,
                 samesite=cookies.samesite,
                 max_age=self.refresh_ttl_days * SECONDS_PER_DAY,
-                path=cookies.path,
+                path=self.refresh_cookie_path or cookies.path,
             )
         else:
             body[REFRESH_TOKEN_NAME] = refresh

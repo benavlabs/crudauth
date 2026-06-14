@@ -9,7 +9,7 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 SESSION_COOKIE_NAME = "session_id"
 CSRF_COOKIE_NAME = "csrf_token"
 
-# Header the SPA echoes the CSRF token in (the double-submit check).
+# Header the SPA echoes the CSRF token in (the synchronizer-token check).
 CSRF_HEADER_NAME = "X-CSRF-Token"
 
 # Storage key prefixes for the session and CSRF stores.

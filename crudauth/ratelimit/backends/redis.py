@@ -76,6 +76,16 @@ class RedisBackend(RateLimiterBackend):
     async def increment_and_check(
         self, key: str, limit: int, period: int, *, fail_open: bool = True
     ) -> tuple[int, bool, int]:
+        """Fixed-window check over a window-stamped key.
+
+        Note:
+            Unlike the general ``increment`` (TTL armed first-touch only), this
+            re-arms ``expire`` on every call - safe and intentional here because
+            the key embeds ``window_start``, so each window is a fresh key that
+            only ever lives one window. Re-arming can't extend a previous
+            window's count; it just keeps the current window's key alive for its
+            own duration.
+        """
         now = int(time.time())
         window_start = now - (now % period)
         wkey = self._k(f"{key}:{window_start}")

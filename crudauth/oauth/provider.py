@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 from urllib.parse import urlencode
 
-from .constants import PKCE_VERIFIER_BYTES, STATE_BYTES
+from .constants import OAUTH_HTTP_TIMEOUT_SECONDS, PKCE_VERIFIER_BYTES, STATE_BYTES
 from .schemas import OAuthUserInfo
 
 __all__ = ["AbstractOAuthProvider"]
@@ -177,7 +177,7 @@ class AbstractOAuthProvider(ABC):
         req_headers = {"Accept": "application/json"}
         if headers:
             req_headers.update(headers)
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=OAUTH_HTTP_TIMEOUT_SECONDS) as client:
             resp = await client.post(self.token_endpoint, data=data, headers=req_headers)
             resp.raise_for_status()
             return resp.json()
@@ -196,7 +196,7 @@ class AbstractOAuthProvider(ABC):
             httpx.HTTPStatusError: If the userinfo endpoint returns an error status.
         """
         httpx = _require_httpx()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=OAUTH_HTTP_TIMEOUT_SECONDS) as client:
             resp = await client.get(
                 self.userinfo_endpoint,
                 headers={

@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-__all__ = ["OAuthCredentials", "OAuthUserInfo", "OAuthState", "OAuthToken"]
+__all__ = ["OAuthCredentials", "OAuthUserInfo", "OAuthState"]
 
 
 def _utcnow() -> datetime:
@@ -50,14 +50,4 @@ class OAuthState(BaseModel):
     provider: str
     code_verifier: str | None = None
     redirect_to: str | None = None
-    created_at: datetime = Field(default_factory=_utcnow)
-
-
-class OAuthToken(BaseModel):
-    access_token: str
-    token_type: str = "Bearer"
-    id_token: str | None = None
-    refresh_token: str | None = None
-    expires_in: int | None = None
-    scope: str | None = None
     created_at: datetime = Field(default_factory=_utcnow)

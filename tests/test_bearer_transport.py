@@ -186,6 +186,37 @@ def test_default_scopes_must_be_subset_of_grantable() -> None:
         BearerTransport(default_scopes=["admin"], grantable_scopes=["reports:read"])
 
 
+async def test_refresh_cookie_path_scopes_the_cookie(get_session, UserModel) -> None:
+    # refresh_cookie_path narrows the refresh cookie to the refresh endpoint
+    # rather than riding every request at "/".
+    auth = CRUDAuth(
+        session=get_session,
+        user_model=UserModel,
+        SECRET_KEY=SECRET,
+        transports=[
+            BearerTransport(
+                refresh="cookie",
+                refresh_cookie_path="/auth/refresh",
+                cookies=CookieConfig(secure=False),
+            )
+        ],
+    )
+    app = FastAPI()
+    app.include_router(auth.router)
+    await auth.initialize()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        await c.post(
+            "/register", json={"email": "a@x.com", "username": "alice", "password": "pw123456"}
+        )
+        r = await c.post("/token", data={"username": "alice", "password": "pw123456"})
+        set_cookie = " ".join(r.headers.get_list("set-cookie"))
+        assert "refresh_token=" in set_cookie
+        assert "Path=/auth/refresh" in set_cookie
+    await auth.shutdown()
+
+
 class _Capture(EmailSender):
     def __init__(self) -> None:
         self.sent: list[dict] = []

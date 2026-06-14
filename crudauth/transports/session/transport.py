@@ -1,7 +1,7 @@
 """The session transport: cookie auth with CSRF, lockout, and device management.
 
 This is the default transport - configuring nothing gives you cookie sessions,
-CSRF double-submit, login lockout, secure cookies, and ``/login`` ``/logout``.
+CSRF synchronizer-token, login lockout, secure cookies, and ``/login`` ``/logout``.
 """
 
 from typing import Annotated, Any
@@ -48,7 +48,7 @@ __all__ = ["SessionTransport"]
 class SessionTransport(Transport):
     """Cookie-based session auth - the default transport.
 
-    Configuring nothing gives cookie sessions, CSRF double-submit (header-only),
+    Configuring nothing gives cookie sessions, CSRF synchronizer-token (header-only),
     login lockout, secure cookies, and ``/login`` ``/logout``. CSRF is enforced
     inside [authenticate][crudauth.core.Transport.authenticate] on unsafe methods; the session cookie is never
     ``SameSite=None`` (rejected at construction).
@@ -56,7 +56,7 @@ class SessionTransport(Transport):
     Args:
         backend: ``"memory"`` (default) or ``"redis"`` for shared/persistent state.
         redis_url: Connection URL when ``backend="redis"``.
-        csrf: Enforce the double-submit header on unsafe methods (default ``True``).
+        csrf: Enforce the synchronizer-token header on unsafe methods (default ``True``).
         cookies: Per-transport [CookieConfig][crudauth.core.CookieConfig] override.
         login_max_attempts: Failed logins before the escalating lockout trips.
 
@@ -196,12 +196,12 @@ class SessionTransport(Transport):
         )
 
     async def _enforce_csrf(self, request: Request, session_id: str) -> None:
-        """Require a valid double-submit header on unsafe methods.
+        """Require a valid synchronizer-token header on unsafe methods.
 
         Note:
             Header-only by design: the ``csrf_token`` cookie auto-rides
             cross-origin requests but a custom header does not, so requiring the
-            header (not just the cookie) is what makes the double-submit check
+            header (not just the cookie) is what makes the synchronizer-token check
             load-bearing. Safe methods (GET/HEAD/OPTIONS) are exempt.
         """
         if not self.csrf_enabled or request.method in SAFE_METHODS:
