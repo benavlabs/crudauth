@@ -39,6 +39,22 @@ def build_app(get_session, UserModel):
     ):
         return {"ok": True}
 
+    # boolean-predicate style: returns False for non-superusers
+    @app.get("/bool-gate")
+    async def bool_gate(_: Principal = Depends(auth.current_user(check=lambda p: p.is_superuser))):
+        return {"ok": True}
+
+    async def _async_check(p: Principal) -> bool:
+        return p.is_superuser
+
+    @app.get("/async-gate")
+    async def async_gate(_: Principal = Depends(auth.current_user(check=_async_check))):
+        return {"ok": True}
+
+    @app.get("/falsy-gate")
+    async def falsy_gate(_: Principal = Depends(auth.current_user(check=lambda p: 0))):
+        return {"ok": True}
+
     return app, auth
 
 
@@ -108,3 +124,48 @@ async def test_check_override_rejects_wrong_domain(ctx) -> None:
     await _login(client, username="sneaky")
     r = await client.get("/admin/users")
     assert r.status_code == 403
+
+
+async def test_bool_check_false_denies(ctx) -> None:
+    # a predicate returning False must DENY (the bug: it was previously ignored)
+    client, sm, UserModel = ctx
+    await _make_user(sm, UserModel, username="plain", is_superuser=False)
+    await _login(client, username="plain")
+    r = await client.get("/bool-gate")
+    assert r.status_code == 403
+
+
+async def test_bool_check_true_allows(ctx) -> None:
+    client, sm, UserModel = ctx
+    await _make_user(sm, UserModel, username="boss", is_superuser=True)
+    await _login(client, username="boss")
+    r = await client.get("/bool-gate")
+    assert r.status_code == 200
+
+
+async def test_async_check_false_denies(ctx) -> None:
+    client, sm, UserModel = ctx
+    await _make_user(sm, UserModel, username="plain", is_superuser=False)
+    await _login(client, username="plain")
+    r = await client.get("/async-gate")
+    assert r.status_code == 403
+
+
+async def test_async_check_true_allows(ctx) -> None:
+    client, sm, UserModel = ctx
+    await _make_user(sm, UserModel, username="boss", is_superuser=True)
+    await _login(client, username="boss")
+    r = await client.get("/async-gate")
+    assert r.status_code == 200
+
+
+async def test_falsy_but_not_false_check_allows(ctx) -> None:
+    # Only the False singleton denies; falsy-but-not-False (here 0) allows. This
+    # is the discriminator that lets raise-style callbacks (return None on
+    # success) coexist with boolean predicates - pinned so a change to
+    # `not result` is caught.
+    client, sm, UserModel = ctx
+    await _make_user(sm, UserModel, username="plain", is_superuser=False)
+    await _login(client, username="plain")
+    r = await client.get("/falsy-gate")
+    assert r.status_code == 200

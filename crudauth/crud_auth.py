@@ -355,8 +355,16 @@ class CRUDAuth:
         """Build a FastAPI dependency that authenticates and authorizes a request.
 
         Every gate is a keyword: ``optional``, ``superuser``, ``verified``,
-        ``scopes``, ``transport`` (narrow to one/some transports), and ``check``
-        (an extra predicate run last, receiving the resolved principal).
+        ``scopes``, ``transport`` (narrow to one/some transports), and ``check``.
+
+        Note:
+            ``check`` is a predicate (sync or async) run last on the resolved
+            principal. Returning ``False`` denies the request with 403. To deny
+            with a custom status/message, raise your own exception from inside
+            ``check``. Returning ``None`` (or anything that isn't ``False``)
+            allows - so both styles work: a boolean predicate
+            (``check=lambda p: p.is_superuser``) and a raise-to-deny callback that
+            simply returns nothing on success.
 
         Note:
             Transports are tried in order, first credential wins. A transport
@@ -404,7 +412,9 @@ class CRUDAuth:
             if check is not None:
                 result = check(principal)
                 if inspect.isawaitable(result):
-                    await result
+                    result = await result
+                if result is False:
+                    raise ForbiddenException("Access denied")
             return principal
 
         return dependency
