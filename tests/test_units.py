@@ -11,6 +11,7 @@ from crudauth.transports.bearer.tokens import (
     TokenType,
     create_access_token,
     create_signed_token,
+    is_expired_token,
     verify_signed_token,
     verify_token,
 )
@@ -146,6 +147,16 @@ def test_token_wrong_secret_rejected() -> None:
 def test_expired_token_rejected() -> None:
     token = create_access_token({"sub": "42"}, SECRET, expires_delta=timedelta(seconds=-1))
     assert verify_token(token, SECRET, TokenType.ACCESS) is None
+
+
+def test_is_expired_token_distinguishes_expiry_from_tampering() -> None:
+    valid = create_access_token({"sub": "1"}, SECRET)
+    expired = create_access_token({"sub": "1"}, SECRET, expires_delta=timedelta(seconds=-1))
+    assert is_expired_token(valid, SECRET) is False
+    assert is_expired_token(expired, SECRET) is True
+    assert is_expired_token("garbage", SECRET) is False
+    # expired AND wrong signature reads as tampered (signature checked first), not "just expired"
+    assert is_expired_token(expired, "wrong-secret-key-0123456789-0123456789") is False
 
 
 def test_signed_token_purpose() -> None:

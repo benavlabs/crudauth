@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Any
 
 import jwt
-from jwt import PyJWTError
+from jwt import ExpiredSignatureError, PyJWTError
 
 from ...constants import (
     DEFAULT_ACCESS_TTL_SECONDS,
@@ -25,6 +25,7 @@ __all__ = [
     "create_access_token",
     "create_refresh_token",
     "verify_token",
+    "is_expired_token",
     "create_signed_token",
     "verify_signed_token",
     "verify_signed_token_full",
@@ -108,9 +109,11 @@ def verify_token(
         algorithm: JWT algorithm.
 
     Returns:
-        The decoded claims dict, or ``None`` for *any* failure (bad signature,
-        expiry, wrong type, missing ``sub``). The caller never needs to
-        distinguish, and distinguishing would leak information.
+        The decoded claims dict, or ``None`` for any failure (bad signature,
+        expiry, wrong type, missing ``sub``). Callers that must tell an *expired*
+        token apart from a *tampered* one (the bearer transport, to fall through
+        rather than hard-fail) pair this with
+        [is_expired_token][crudauth.transports.bearer.tokens.is_expired_token].
     """
     try:
         payload = jwt.decode(token, secret_key, algorithms=[algorithm])
@@ -121,6 +124,33 @@ def verify_token(
     if payload.get("sub") is None:
         return None
     return payload
+
+
+def is_expired_token(token: str, secret_key: str, *, algorithm: str = DEFAULT_ALGORITHM) -> bool:
+    """Whether ``token`` fails to verify *solely* because it has expired.
+
+    A correctly-signed, well-formed token that is merely past its ``exp`` returns
+    ``True``; a tampered or bad-signature token returns ``False`` (the signature
+    is checked before expiry, so a forged-and-expired token does not slip
+    through as "just expired"). Lets the bearer transport treat an expired access
+    token as an absent credential - falling through to the next transport or to
+    anonymous - while still hard-failing a tampered one.
+
+    Args:
+        token: The encoded JWT.
+        secret_key: HMAC key the token was signed with.
+        algorithm: JWT algorithm.
+
+    Returns:
+        ``True`` if the only verification failure is expiry, else ``False``.
+    """
+    try:
+        jwt.decode(token, secret_key, algorithms=[algorithm])
+    except ExpiredSignatureError:
+        return True
+    except PyJWTError:
+        return False
+    return False
 
 
 def create_signed_token(

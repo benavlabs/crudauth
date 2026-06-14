@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import httpx
 import pytest
 from fastapi import Depends, FastAPI
 
 from crudauth import BearerTransport, CRUDAuth, CookieConfig, Principal, SessionTransport
+from crudauth.transports.bearer.tokens import TokenType, create_access_token, verify_token
+
+SECRET = "test-secret-key-0123456789-0123456789"
 
 
 def build_app(get_session, UserModel):
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="test-secret-key-0123456789-0123456789",
+        SECRET_KEY=SECRET,
         transports=[
-            BearerTransport(access_ttl=900, refresh="cookie", cookies=CookieConfig(secure=False))
+            BearerTransport(
+                access_ttl=900,
+                refresh="cookie",
+                cookies=CookieConfig(secure=False),
+                grantable_scopes=["reports:read"],
+            )
         ],
     )
     app = FastAPI()
@@ -28,6 +38,10 @@ def build_app(get_session, UserModel):
     @app.get("/v1/reports")
     async def reports(user: Principal = Depends(auth.current_user(scopes=["reports:read"]))):
         return {"ok": True}
+
+    @app.get("/v1/maybe")
+    async def maybe(user: Principal | None = Depends(auth.current_user(optional=True))):
+        return {"auth": user is not None}
 
     return app, auth
 
@@ -71,6 +85,40 @@ async def test_bad_token_401(client) -> None:
     assert r.status_code == 401
 
 
+async def _expired_token(client) -> str:
+    await _register(client)
+    valid = (
+        await client.post("/token", data={"username": "alice", "password": "pw123456"})
+    ).json()["access_token"]
+    payload = verify_token(valid, SECRET, TokenType.ACCESS)
+    assert payload is not None
+    return create_access_token({"sub": payload["sub"]}, SECRET, expires_delta=timedelta(seconds=-1))
+
+
+async def test_expired_token_is_anonymous_under_optional(client) -> None:
+    # expiry is the normal steady state, not an attack: optional auth treats it
+    # as anonymous (200) rather than hard-failing (401).
+    expired = await _expired_token(client)
+    r = await client.get("/v1/maybe", headers={"Authorization": f"Bearer {expired}"})
+    assert r.status_code == 200
+    assert r.json() == {"auth": False}
+
+
+async def test_expired_token_on_required_route_401(client) -> None:
+    # required route still 401s (no other credential), but as "not authenticated"
+    # after falling through - not a tampered-credential hard-fail.
+    expired = await _expired_token(client)
+    r = await client.get("/v1/items", headers={"Authorization": f"Bearer {expired}"})
+    assert r.status_code == 401
+
+
+async def test_tampered_token_still_hard_fails_under_optional(client) -> None:
+    # a tampered token is an attack signal and hard-fails even under optional.
+    await _register(client)
+    r = await client.get("/v1/maybe", headers={"Authorization": "Bearer garbage"})
+    assert r.status_code == 401
+
+
 async def test_refresh_flow(client) -> None:
     await _register(client)
     r = await client.post("/token", data={"username": "alice", "password": "pw123456"})
@@ -98,6 +146,69 @@ async def test_scope_missing_403(client) -> None:
     token = r.json()["access_token"]
     r = await client.get("/v1/reports", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
+
+
+async def test_ungrantable_scope_is_clamped_out(client) -> None:
+    # a scope outside grantable_scopes is silently dropped, not self-granted
+    await _register(client)
+    r = await client.post(
+        "/token", data={"username": "alice", "password": "pw123456", "scope": "admin"}
+    )
+    token = r.json()["access_token"]
+    payload = verify_token(token, SECRET, TokenType.ACCESS)
+    assert payload is not None
+    assert "admin" not in payload.get("scopes", [])
+
+
+async def test_self_granted_scope_does_not_satisfy_gate(client) -> None:
+    # requesting reports:read works (it's grantable); requesting admin does not
+    # let the holder reach an admin-gated route - it's clamped out.
+    await _register(client)
+    r = await client.post(
+        "/token", data={"username": "alice", "password": "pw123456", "scope": "admin reports:read"}
+    )
+    token = r.json()["access_token"]
+    payload = verify_token(token, SECRET, TokenType.ACCESS)
+    assert payload is not None
+    assert set(payload.get("scopes", [])) == {"reports:read"}  # admin dropped, reports:read kept
+
+
+def test_default_scopes_must_be_subset_of_grantable() -> None:
+    with pytest.raises(ValueError, match="subset"):
+        BearerTransport(default_scopes=["admin"], grantable_scopes=["reports:read"])
+
+
+async def test_refresh_reclamps_after_grantable_tightened(get_session, UserModel) -> None:
+    # An outstanding refresh token carries scope "b"; after the operator removes
+    # "b" from grantable_scopes, /refresh must stop minting it.
+    bearer = BearerTransport(
+        refresh="body",
+        default_scopes=["a", "b"],
+        grantable_scopes=["a", "b"],
+        cookies=CookieConfig(secure=False),
+    )
+    auth = CRUDAuth(
+        session=get_session, user_model=UserModel, SECRET_KEY=SECRET, transports=[bearer]
+    )
+    app = FastAPI()
+    app.include_router(auth.router)
+    await auth.initialize()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        await c.post(
+            "/register", json={"email": "a@x.com", "username": "alice", "password": "pw123456"}
+        )
+        tok = await c.post("/token", data={"username": "alice", "password": "pw123456"})
+        refresh = tok.json()["refresh_token"]
+
+        bearer.grantable_scopes = frozenset({"a"})  # operator tightens the ceiling
+
+        r = await c.post("/refresh", json={"refresh_token": refresh})
+        payload = verify_token(r.json()["access_token"], SECRET, TokenType.ACCESS)
+        assert payload is not None
+        assert set(payload.get("scopes", [])) == {"a"}  # "b" no longer grantable → dropped
+    await auth.shutdown()
 
 
 async def test_token_shares_lockout_with_login(get_session, UserModel) -> None:

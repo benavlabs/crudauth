@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import httpx
 from fastapi import Depends, FastAPI
 
 from crudauth import BearerTransport, CRUDAuth, CookieConfig, Principal, SessionTransport
+from crudauth.transports.bearer.tokens import TokenType, create_access_token, verify_token
+
+SECRET = "test-secret-key-0123456789-0123456789"
 
 
 def build_app(get_session, UserModel, session_first=True):
@@ -91,6 +96,23 @@ async def test_bearer_first_invalid_token_hard_fails(get_session, UserModel) -> 
         await _setup(client)  # establishes a valid session cookie
         r = await client.get("/me2", headers={"Authorization": "Bearer garbage"})
         assert r.status_code == 401
+    await auth.shutdown()
+
+
+async def test_expired_bearer_falls_through_to_session(get_session, UserModel) -> None:
+    # bearer first; an EXPIRED (not tampered) access token is treated as no
+    # credential, so a valid session cookie still authenticates the request.
+    app, auth = build_app(get_session, UserModel, session_first=False)
+    async with await _client(app, auth) as client:
+        _, token = await _setup(client)  # valid session cookie + valid bearer token
+        payload = verify_token(token, SECRET, TokenType.ACCESS)
+        assert payload is not None
+        expired = create_access_token(
+            {"sub": payload["sub"]}, SECRET, expires_delta=timedelta(seconds=-1)
+        )
+        r = await client.get("/me2", headers={"Authorization": f"Bearer {expired}"})
+        assert r.status_code == 200
+        assert r.json()["via"] == "session"
     await auth.shutdown()
 
 

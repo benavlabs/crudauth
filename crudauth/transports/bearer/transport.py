@@ -32,6 +32,7 @@ from .tokens import (
     TokenType,
     create_access_token,
     create_refresh_token,
+    is_expired_token,
     verify_token,
 )
 
@@ -48,6 +49,18 @@ class BearerTransport(Transport):
             or ``"body"`` (returned in the JSON response).
         default_scopes: Scopes granted to password-login tokens when the client
             doesn't request a narrower set.
+        grantable_scopes: The maximum set of scopes ``/token`` will ever issue.
+            A client's requested scopes are intersected with this set, so a
+            client cannot self-grant a scope it asks for. Defaults to
+            ``default_scopes`` (clients may only narrow, never widen).
+
+    Note:
+        Issued scopes are **clamped** to ``grantable_scopes`` - the password
+        grant silently drops anything outside the grantable set, so an endpoint
+        gated by ``scopes=[...]`` can't be satisfied by a self-granted scope. The
+        clamp is re-applied at ``/refresh``, so tightening ``grantable_scopes``
+        also drops a removed scope from tokens minted off existing refresh
+        tokens (rather than honoring it until the refresh token expires).
 
     Note:
         Bearer tokens are **stateless** - there is no server-side revocation or
@@ -76,6 +89,7 @@ class BearerTransport(Transport):
         refresh_ttl_days: int = DEFAULT_REFRESH_TTL_DAYS,
         refresh: str = REFRESH_LOCATION_COOKIE,
         default_scopes: list[str] | None = None,
+        grantable_scopes: list[str] | None = None,
         refresh_cookie_name: str = REFRESH_TOKEN_NAME,
         cookies: CookieConfig | None = None,
     ):
@@ -85,6 +99,13 @@ class BearerTransport(Transport):
         self.refresh_ttl_days = refresh_ttl_days
         self.refresh = refresh
         self.default_scopes = tuple(default_scopes or ())
+        self.grantable_scopes = (
+            frozenset(grantable_scopes)
+            if grantable_scopes is not None
+            else frozenset(self.default_scopes)
+        )
+        if not set(self.default_scopes) <= self.grantable_scopes:
+            raise ValueError("default_scopes must be a subset of grantable_scopes")
         self.refresh_cookie_name = refresh_cookie_name
         self._cookie_override = cookies
 
@@ -94,13 +115,15 @@ class BearerTransport(Transport):
 
         Note:
             Absent or non-bearer header → ``None`` (this transport's credential
-            isn't present; the facade tries the next transport). A present but
-            *invalid* token (bad signature, expired, wrong type) → raises
-            ``UnauthorizedException``: a tampered credential hard-fails rather
-            than silently falling through, mirroring the session transport's
-            CSRF behavior. A valid token whose user no longer
-            exists / is inactive returns ``None`` (account vanished, treat as
-            anonymous), matching the session transport.
+            isn't present; the facade tries the next transport). An *expired*
+            access token also → ``None``: expiry is the normal steady state of a
+            short-lived token, not an attack signal, so it falls through to the
+            next transport (e.g. a valid session cookie) and is treated as
+            anonymous under ``optional=True``. A *tampered* token (bad signature,
+            wrong type, missing ``sub``) → raises ``UnauthorizedException``,
+            mirroring the session transport's CSRF hard-fail. A valid token whose
+            user no longer exists / is inactive returns ``None`` (account
+            vanished, treat as anonymous).
         """
         header = request.headers.get("authorization")
         if not header:
@@ -113,7 +136,9 @@ class BearerTransport(Transport):
             token, self.runtime.secret_key, TokenType.ACCESS, algorithm=self.runtime.algorithm
         )
         if payload is None:
-            raise UnauthorizedException("Invalid or expired token")
+            if is_expired_token(token, self.runtime.secret_key, algorithm=self.runtime.algorithm):
+                return None
+            raise UnauthorizedException("Invalid token")
 
         user = await ctx.resolve_user(payload["sub"])
         if user is None or not ctx.repo.is_active(user):
@@ -169,7 +194,7 @@ class BearerTransport(Transport):
             if lockout is not None:
                 await lockout.check_and_record(ip, login_id, success=True)
 
-            scopes = tuple(form_data.scopes) if form_data.scopes else self.default_scopes
+            scopes = self._grant_scopes(form_data.scopes)
             body = self._mint(runtime, user, scopes, response)
             await runtime.hooks.run_after_login(
                 runtime.repo.to_dict(user),
@@ -197,7 +222,7 @@ class BearerTransport(Transport):
             user = await runtime.repo.get_by_id(db, payload["sub"])
             if user is None or not runtime.repo.is_active(user):
                 raise UnauthorizedException("Invalid or expired refresh token")
-            scopes = tuple(payload.get("scopes") or ())
+            scopes = self._clamp_scopes(payload.get("scopes") or ())
             access = create_access_token(
                 {"sub": str(runtime.repo.user_id(user))},
                 runtime.secret_key,
@@ -210,6 +235,16 @@ class BearerTransport(Transport):
         return router
 
     # --- helpers -------------------------------------------------------------
+    def _clamp_scopes(self, scopes: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+        """Drop any scope not in ``grantable_scopes`` (the issued ⊆ grantable invariant)."""
+        return tuple(s for s in scopes if s in self.grantable_scopes)
+
+    def _grant_scopes(self, requested: list[str] | None) -> tuple[str, ...]:
+        """Resolve scopes to issue at ``/token``: the request (or ``default_scopes``
+        if none) clamped to ``grantable_scopes``, so a client can only narrow."""
+        asked = tuple(requested) if requested else self.default_scopes
+        return self._clamp_scopes(asked)
+
     def _mint(
         self, runtime: AuthRuntime, user: Any, scopes: tuple[str, ...], response: Response
     ) -> dict[str, Any]:
