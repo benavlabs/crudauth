@@ -178,7 +178,6 @@ class SessionTransport(Transport):
         if not session_id:
             return None
 
-        await self.manager.cleanup_expired_sessions()
         session = await self.manager.validate_session(session_id)
         if session is None:
             return None

@@ -138,7 +138,7 @@ class SessionManager:
         if not session_id:
             return None
         session = await self.storage.get(session_id, SessionData)
-        if session is None or not session.is_active:
+        if session is None:
             return None
         now = _utcnow()
         if self._is_idle_expired(session, now):
@@ -209,7 +209,7 @@ class SessionManager:
         out: list[dict[str, Any]] = []
         for sid in await self._user_session_ids(user_id):
             session = await self.storage.get(sid, SessionData)
-            if session is None or not session.is_active:
+            if session is None:
                 continue
             out.append(
                 {
@@ -406,7 +406,7 @@ class SessionManager:
         active: list[SessionData] = []
         for sid in ids:
             session = await self.storage.get(sid, SessionData)
-            if session is not None and session.is_active:
+            if session is not None:
                 active.append(session)
         if len(active) >= self.max_sessions:
             active.sort(key=lambda s: s.last_activity)
@@ -417,17 +417,21 @@ class SessionManager:
                 )
 
     async def cleanup_expired_sessions(self, force: bool = False) -> None:
-        """Sweep idle-expired sessions (throttled by ``cleanup_interval``).
+        """Proactively sweep idle-expired sessions (throttled by ``cleanup_interval``).
 
-        Needs the storage's optional ``scan_keys`` capability; a backend without
-        it simply gets no proactive sweep (per-key TTLs still expire entries).
+        Not called on the auth path: session TTL equals the idle window, so the
+        storage backend evicts idle sessions on its own and ``validate_session``
+        catches idle-on-read. This sweep is therefore optional - call it
+        explicitly (e.g. ``force=True`` from an ops job) if a no-TTL BYO backend
+        needs proactive pruning. Needs the storage's optional ``scan_keys``
+        capability; a backend without it simply gets no sweep.
 
         Note:
             Login-lockout keys (``login:*``) are deliberately NOT swept - they
             carry their own TTLs (attempt window, lockout duration, round
             retention), and bulk-deleting them would clear live lockouts and
-            reset the exponential-backoff escalation on every sweep (Convention
-            9). Never pattern-delete the lockout keys here.
+            reset the exponential-backoff escalation. Never pattern-delete the
+            lockout keys here.
         """
         now = _utcnow()
         if not force and now - self.last_cleanup < self.cleanup_interval:
@@ -443,7 +447,7 @@ class SessionManager:
         for key in keys:
             sid = key[len(self.storage.prefix) :] if key.startswith(self.storage.prefix) else key
             session = await self.storage.get(sid, SessionData)
-            if session is not None and session.is_active and self._is_idle_expired(session, now):
+            if session is not None and self._is_idle_expired(session, now):
                 await self.terminate_session(sid, reason="session_timeout", user_id=session.user_id)
 
     # --- login lockout -------------------------------------------------------

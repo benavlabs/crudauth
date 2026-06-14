@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from starlette.requests import Request
 
 from crudauth.ratelimit import LockoutPolicy, MemoryRateLimiterBackend
@@ -60,6 +62,20 @@ async def test_regenerate_csrf_rotates() -> None:
 async def test_regenerate_csrf_missing_session_returns_empty() -> None:
     mgr = build_manager()
     assert await mgr.regenerate_csrf_token(user_id=1, session_id="nope") == ""
+
+
+async def test_validate_session_evicts_idle_on_read() -> None:
+    # the load-bearing guarantee now that the per-request sweep is gone:
+    # validate_session catches an idle-expired session and terminates it.
+    mgr = build_manager()
+    sid, _ = await mgr.create_session(make_request(), user_id=1)
+    session = await mgr.storage.get(sid, SessionData)
+    assert session is not None
+    session.last_activity = session.last_activity - timedelta(days=999)  # force past idle window
+    await mgr.storage.update(sid, session)
+
+    assert await mgr.validate_session(sid) is None  # rejected on read
+    assert await mgr.storage.get(sid, SessionData) is None  # and terminated, not left dangling
 
 
 async def test_revoke() -> None:
