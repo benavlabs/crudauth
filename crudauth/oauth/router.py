@@ -12,7 +12,7 @@ from ..exceptions import BadRequestException
 from ..hooks import HookContext
 from ..storage.base import AbstractSessionStorage
 from .constants import OAUTH_STATE_COOKIE_NAME
-from .provider import AbstractOAuthProvider
+from .provider import AbstractOAuthProvider, _require_httpx
 from .schemas import OAuthState
 from .service import OAuthAccountService
 
@@ -72,6 +72,20 @@ def build_oauth_router(
             raise BadRequestException(f"Unknown or unconfigured OAuth provider: {name!r}")
         return provider
 
+    def _error_redirect() -> RedirectResponse:
+        """Redirect to the post-login default with an ``error`` marker.
+
+        Used for any non-success callback (provider error, malformed callback,
+        token/userinfo failure) so the browser lands on a clean page instead of a
+        422/500. Also clears the state-binding cookie.
+        """
+        sep = "&" if "?" in default_redirect else "?"
+        redirect = RedirectResponse(
+            url=f"{default_redirect}{sep}error=oauth_failed", status_code=307
+        )
+        redirect.delete_cookie(OAUTH_STATE_COOKIE_NAME, path=session_manager.cookie_path)
+        return redirect
+
     @router.get("/{provider}/authorize")
     async def authorize(provider: str, redirect_to: Annotated[str | None, Query()] = None):
         """Start the OAuth flow: stash state + PKCE and 307-redirect to the provider.
@@ -115,8 +129,9 @@ def build_oauth_router(
         request: Request,
         response: Response,
         db: Annotated[Any, Depends(db_dep)],
-        code: Annotated[str, Query()],
-        state: Annotated[str, Query()],
+        code: Annotated[str | None, Query()] = None,
+        state: Annotated[str | None, Query()] = None,
+        error: Annotated[str | None, Query()] = None,
     ):
         """Handle the provider callback: verify state/PKCE, link-or-create the
         user, start a session, and 307-redirect to the validated target.
@@ -126,8 +141,20 @@ def build_oauth_router(
             ``authorize`` (login-CSRF / fixation defense), and is then consumed
             with an atomic ``get_and_delete`` so two concurrent callbacks can't
             both redeem the same state+code pair.
+
+        Note:
+            Non-success callbacks redirect to the post-login default with
+            ``?error=oauth_failed`` rather than surfacing a 422/500: a
+            provider-reported ``?error=...`` (e.g. the user declined), a malformed
+            callback (missing ``code``/``state``), a token-exchange or userinfo
+            HTTP failure, a missing ``access_token`` (some providers, e.g. GitHub,
+            signal failure with HTTP 200 + an error body), or a userinfo payload
+            that breaks the provider's parser (``ValueError``/``KeyError``). The
+            intentional policy 400s (no email / unverified-link) still surface.
         """
         prov = _provider(provider)
+        if error or not code or not state:
+            return _error_redirect()
         bound = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
         if not bound or bound != state:
             raise BadRequestException("Invalid or expired OAuth state")
@@ -135,9 +162,16 @@ def build_oauth_router(
         if state_data is None or state_data.provider != provider:
             raise BadRequestException("Invalid or expired OAuth state")
 
-        token = await prov.exchange_code(code, code_verifier=state_data.code_verifier)
-        raw = await prov.get_user_info(token["access_token"])
-        info = await prov.process_user_info(raw)
+        httpx = _require_httpx()
+        try:
+            token = await prov.exchange_code(code, code_verifier=state_data.code_verifier)
+            access_token = token.get("access_token")
+            if not access_token:
+                return _error_redirect()
+            raw = await prov.get_user_info(access_token)
+            info = await prov.process_user_info(raw)
+        except (httpx.HTTPError, ValueError, KeyError):
+            return _error_redirect()
 
         user, created = await account_service.get_or_create_user(info, db)
 

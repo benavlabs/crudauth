@@ -130,3 +130,63 @@ async def test_callback_requires_browser_bound_state(client) -> None:
 
     # /me confirms no session was established for the would-be victim
     assert (await client.get("/me")).status_code == 401
+
+
+async def test_callback_provider_error_redirects(client) -> None:
+    # provider redirects back with ?error= (e.g. user declined) → graceful
+    # redirect, not a 422 for the now-missing code.
+    r = await client.get("/oauth/stub/callback?error=access_denied&state=whatever")
+    assert r.status_code == 307
+    assert "error=oauth_failed" in r.headers["location"]
+    assert (await client.get("/me")).status_code == 401
+
+
+async def test_callback_missing_code_redirects(client) -> None:
+    r = await client.get("/oauth/stub/callback?state=whatever")
+    assert r.status_code == 307
+    assert "error=oauth_failed" in r.headers["location"]
+
+
+async def _start_flow(client) -> str:
+    r = await client.get("/oauth/stub/authorize")
+    return parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+
+
+async def test_callback_missing_access_token_redirects(client, monkeypatch) -> None:
+    # some providers (e.g. GitHub) signal failure with HTTP 200 + an error body
+    # and no access_token → must not KeyError into a 500.
+    async def no_token(self, code, code_verifier=None, headers=None):
+        return {"error": "bad_verification_code"}
+
+    monkeypatch.setattr(StubProvider, "exchange_code", no_token)
+    state = await _start_flow(client)
+    r = await client.get(f"/oauth/stub/callback?code=abc&state={state}")
+    assert r.status_code == 307
+    assert "error=oauth_failed" in r.headers["location"]
+    assert (await client.get("/me")).status_code == 401
+
+
+async def test_callback_exchange_http_error_redirects(client, monkeypatch) -> None:
+    async def boom(self, code, code_verifier=None, headers=None):
+        raise httpx.ConnectError("provider down")
+
+    monkeypatch.setattr(StubProvider, "exchange_code", boom)
+    state = await _start_flow(client)
+    r = await client.get(f"/oauth/stub/callback?code=abc&state={state}")
+    assert r.status_code == 307
+    assert "error=oauth_failed" in r.headers["location"]
+    assert (await client.get("/me")).status_code == 401
+
+
+async def test_callback_userinfo_parse_error_redirects(client, monkeypatch) -> None:
+    # a malformed 200 userinfo that breaks the provider's parser (KeyError) must
+    # redirect, not 500.
+    async def bad_parse(self, user_info):
+        raise KeyError("id")
+
+    monkeypatch.setattr(StubProvider, "process_user_info", bad_parse)
+    state = await _start_flow(client)
+    r = await client.get(f"/oauth/stub/callback?code=abc&state={state}")
+    assert r.status_code == 307
+    assert "error=oauth_failed" in r.headers["location"]
+    assert (await client.get("/me")).status_code == 401
