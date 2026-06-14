@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -116,8 +116,11 @@ class MemorySessionStorage(AbstractSessionStorage[T]):
         return key in self.data
 
     async def scan_keys(self, match: str | None = None) -> list[str]:
-        pattern = re.compile(match.replace("*", ".*")) if match else None
-        return [k for k in list(self.data.keys()) if pattern is None or pattern.fullmatch(k)]
+        """Enumerate keys by **glob** (e.g. ``"session:*"``), matching the Redis
+        backend's semantics. ``None`` returns all keys."""
+        if match is None:
+            return list(self.data.keys())
+        return [k for k in list(self.data.keys()) if fnmatch.fnmatchcase(k, match)]
 
     async def get_user_sessions(self, user_id: Any) -> list[str]:
         """Scan all sessions and return ids belonging to ``user_id``.
@@ -141,7 +144,9 @@ class MemorySessionStorage(AbstractSessionStorage[T]):
         return sessions
 
     async def delete_pattern(self, pattern: str) -> int:
-        keys = await self.scan_keys(f"{pattern}")
+        """Delete keys whose name starts with ``pattern`` (matches ``{pattern}*``),
+        the same prefix semantics as the Redis backend."""
+        keys = await self.scan_keys(f"{pattern}*")
         count = 0
         for key in keys:
             sid = key[len(self.prefix) :] if key.startswith(self.prefix) else key

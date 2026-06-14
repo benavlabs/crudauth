@@ -84,6 +84,23 @@ async def test_delete_without_user_id_still_updates_index(storage) -> None:
     assert await storage.get_user_sessions(9) == []
 
 
+async def test_delete_pattern_prefix_semantics(storage) -> None:
+    # both backends: delete_pattern(prefix) removes every key under that prefix
+    # (memory used to be a no-op and diverge from Redis).
+    await storage.create(SessionData(user_id=1), session_id="abc")
+    await storage.create(SessionData(user_id=2), session_id="def")
+    deleted = await storage.delete_pattern("t:")  # the fixture's prefix
+    assert deleted == 2
+    assert await storage.exists("abc") is False
+    assert await storage.exists("def") is False
+
+
+async def test_scan_keys_glob(storage) -> None:
+    await storage.create(SessionData(user_id=1), session_id="abc")
+    assert "t:abc" in await storage.scan_keys("t:*")
+    assert await storage.scan_keys("nomatch:*") == []
+
+
 async def test_set_if_absent_first_wins(storage) -> None:
     assert await storage.set_if_absent("tok", SessionData(user_id=1), expiration=50) is True
     # second attempt on the same key loses
