@@ -290,6 +290,12 @@ class EmailFlowService:
         """Apply a confirmed email change.
 
         Note:
+            The confirmation link is delivered to, and clicked from, the new
+            address, so completing this flow proves control of it - the new email
+            is therefore marked verified (``email_verified=True``) alongside the
+            address update.
+
+        Note:
             Availability is re-checked before consuming the token so a token
             isn't burned when the address was taken in the meantime - but that
             check is best-effort: the DB unique constraint is the real backstop.
@@ -310,7 +316,7 @@ class EmailFlowService:
         if not await self._consume(token, self.config.change_ttl_hours * SECONDS_PER_HOUR):
             raise BadRequestException("Token already used")
         try:
-            await self.repo.update(db, user, {"email": new_email})
+            await self.repo.update(db, user, {"email": new_email, "email_verified": True})
         except IntegrityError as exc:
             await db.rollback()
             raise DuplicateValueException("Email already in use") from exc

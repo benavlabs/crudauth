@@ -7,6 +7,9 @@ import pytest
 from fastapi import FastAPI
 
 from crudauth import AuthHooks, CookieConfig, CRUDAuth, EmailConfig, EmailSender, SessionTransport
+from crudauth.email.service import EmailFlowService
+from crudauth.repository import UserRepository
+from crudauth.utils import get_password_hash
 
 
 class CapturingSender(EmailSender):
@@ -82,6 +85,31 @@ async def test_email_change_round_trip(ctx) -> None:
     # /me now reflects the new address
     me = await client.get("/me")
     assert me.json()["email"] == "alice2@x.com"
+
+
+async def test_confirm_email_change_marks_verified(sessionmaker, UserModel) -> None:
+    # Clicking the link from the NEW address proves control of it, so the change
+    # confirmation marks the email verified - even if the account was unverified.
+    repo = UserRepository(UserModel)
+    sender = CapturingSender()
+    svc = EmailFlowService(
+        repo=repo,
+        secret_key="test-secret-key-0123456789-0123456789",
+        config=EmailConfig(sender=sender, frontend_url="https://app"),
+        hooks=AuthHooks(),
+    )
+    async with sessionmaker() as db:
+        user = await repo.create(
+            db, {"email": "old@x.com", "username": "u", "hashed_password": get_password_hash("pw")}
+        )
+        assert repo.email_verified(user) is False
+        await svc.request_email_change(db, user, "new@x.com", "pw")
+
+    token = sender.token_for("change_email")
+    async with sessionmaker() as db:
+        updated = await svc.confirm_email_change(db, token)
+    assert repo.get(updated, "email") == "new@x.com"
+    assert repo.email_verified(updated) is True
 
 
 async def test_email_change_wrong_password_rejected(ctx) -> None:
