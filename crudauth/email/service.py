@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -27,6 +28,7 @@ from .constants import (
     CHANGE_ACTION,
     RESET,
     RESET_ACTION,
+    EmailKind,
     SUBJECT_CHANGE,
     SUBJECT_EXISTING_ACCOUNT,
     SUBJECT_RESET,
@@ -40,6 +42,8 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..transports.session.manager import SessionManager
 
 __all__ = ["EmailFlowService"]
+
+logger = logging.getLogger("crudauth")
 
 
 class _UsedToken(BaseModel):
@@ -110,6 +114,21 @@ class EmailFlowService:
         )
         return not limited
 
+    async def _send_best_effort(self, *, to: str, subject: str, body: str, kind: EmailKind) -> None:
+        """Deliver a trigger email without letting a send failure fail the request.
+
+        These request endpoints only reach the send when the user/address exists,
+        so a propagated send error (blocking adapter + provider down) would 500
+        for existing addresses while absent ones return the uniform success - an
+        existence oracle. Swallow + log instead, preserving non-enumeration.
+        (Senders should enqueue rather than block; this is the safety net when
+        they don't.)
+        """
+        try:
+            await self.config.sender.send(to=to, subject=subject, body=body, kind=kind)
+        except Exception:
+            logger.warning("crudauth: %s email failed to send", kind, exc_info=True)
+
     async def notify_existing_account(self, email: str) -> None:
         """Tell an existing owner someone tried to register with their email.
 
@@ -147,7 +166,7 @@ class EmailFlowService:
             expires_hours=self.config.verify_ttl_hours,
             algorithm=self.algorithm,
         )
-        await self.config.sender.send(
+        await self._send_best_effort(
             to=email,
             subject=SUBJECT_VERIFY,
             body=f"Verify your email: {self.config.link(self.config.verify_path, token)}",
@@ -197,7 +216,7 @@ class EmailFlowService:
             expires_hours=self.config.reset_ttl_hours,
             algorithm=self.algorithm,
         )
-        await self.config.sender.send(
+        await self._send_best_effort(
             to=email,
             subject=SUBJECT_RESET,
             body=f"Reset your password: {self.config.link(self.config.reset_path, token)}",
@@ -279,7 +298,7 @@ class EmailFlowService:
                 algorithm=self.algorithm,
                 extra_claims={"new_email": new_email_c},
             )
-            await self.config.sender.send(
+            await self._send_best_effort(
                 to=new_email_c,
                 subject=SUBJECT_CHANGE,
                 body=f"Confirm your new email: {self.config.link(self.config.change_path, token)}",

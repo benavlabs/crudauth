@@ -162,6 +162,32 @@ async def test_reset_request_idempotent_for_unknown_email(ctx) -> None:
     assert sender.sent == []
 
 
+class _BoomSender(EmailSender):
+    async def send(self, *, to, subject, body, kind) -> None:
+        raise RuntimeError("SMTP down")
+
+
+async def test_reset_request_uniform_when_send_fails(sessionmaker, UserModel) -> None:
+    # existing user + failing send must NOT propagate (no 500), so the response
+    # stays identical to the absent-user case (no existence oracle).
+    repo = UserRepository(UserModel)
+    svc = EmailFlowService(
+        repo=repo,
+        secret_key="test-secret-key-0123456789-0123456789",
+        config=EmailConfig(sender=_BoomSender(), frontend_url="https://app"),
+        hooks=AuthHooks(),
+    )
+    async with sessionmaker() as db:
+        await repo.create(
+            db, {"email": "real@x.com", "username": "r", "hashed_password": get_password_hash("pw")}
+        )
+        # existing address: send raises internally but the call must complete
+        await svc.request_password_reset(db, "real@x.com")
+        # absent address: returns early, never sends
+        await svc.request_password_reset(db, "ghost@x.com")
+    # both reached here without raising → uniform behavior preserved
+
+
 class _FailingSender(EmailSender):
     async def send(self, *, to, subject, body, kind) -> None:
         raise RuntimeError("smtp down")
