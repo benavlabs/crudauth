@@ -10,9 +10,10 @@ from collections.abc import Awaitable
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.exc import IntegrityError
 
+from .constants import MIN_PASSWORD_LENGTH
 from .exceptions import DuplicateValueException
 from .hooks import HookContext
 from .ratelimit import KeyBy
@@ -28,11 +29,17 @@ _ENROLLED_DETAIL = "If the email is available, check your inbox to finish signin
 class RegisterIn(BaseModel):
     """Default registration body. Supply your own via ``register_schema=`` to add
     fields - but an extra field is persisted only if its name is opted in via
-    ``register_extra_fields=``; otherwise registration drops it."""
+    ``register_extra_fields=``; otherwise registration drops it.
+
+    Note:
+        ``password`` enforces ``MIN_PASSWORD_LENGTH`` (matching the reset flow). A
+        custom ``register_schema`` governs its own policy - apply your own
+        ``Field`` constraints / validators there.
+    """
 
     email: EmailStr
     username: str
-    password: str
+    password: Annotated[str, Field(min_length=MIN_PASSWORD_LENGTH)]
 
 
 def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter:

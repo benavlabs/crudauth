@@ -134,6 +134,26 @@ async def test_register_rejects_invalid_email(get_session, UserModel) -> None:
     await auth.shutdown()
 
 
+async def test_register_rejects_short_password(get_session, UserModel) -> None:
+    auth = CRUDAuth(
+        session=get_session,
+        user_model=UserModel,
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
+        transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+    )
+    app = FastAPI()
+    app.include_router(auth.router)
+    await auth.initialize()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        r = await c.post(
+            "/register", json={"email": "a@x.com", "username": "u", "password": "short"}
+        )
+        assert r.status_code == 422  # below MIN_PASSWORD_LENGTH, like the reset flow
+    await auth.shutdown()
+
+
 # =============================================================================
 # session transport rejects SameSite=None at construction
 # =============================================================================
