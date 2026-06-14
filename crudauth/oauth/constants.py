@@ -18,6 +18,10 @@ USERNAME_RANDOM_SUFFIX_BYTES = 4
 STATE_BYTES = 32
 PKCE_VERIFIER_BYTES = 64
 
+# Short-lived cookie that binds the OAuth state to the browser that began the
+# flow, so a callback URL captured by an attacker can't log a victim in.
+OAUTH_STATE_COOKIE_NAME = "oauth_state"
+
 # Google endpoints + default scopes.
 GOOGLE_AUTHORIZE_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"

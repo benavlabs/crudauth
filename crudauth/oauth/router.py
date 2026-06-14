@@ -10,6 +10,7 @@ from ..core import AuthRuntime
 from ..exceptions import BadRequestException
 from ..hooks import HookContext
 from ..storage.base import AbstractSessionStorage
+from .constants import OAUTH_STATE_COOKIE_NAME
 from .provider import AbstractOAuthProvider
 from .schemas import OAuthState
 from .service import OAuthAccountService
@@ -68,6 +69,13 @@ def build_oauth_router(
 
         ``redirect_to`` is where the callback sends the browser afterwards (only
         same-origin relative paths are honored).
+
+        Note:
+            Sets a short-lived, HttpOnly, ``SameSite=Lax`` cookie holding the
+            ``state``. The callback requires it to match the ``state`` query
+            param, which binds the flow to the browser that started it - an
+            attacker who captures a valid callback URL can't replay it in a
+            victim's browser (login CSRF / session fixation).
         """
         prov = _provider(provider)
         auth_data = prov.get_authorization_url()
@@ -80,7 +88,17 @@ def build_oauth_router(
         await state_storage.create(
             state, session_id=auth_data["state"], expiration=OAUTH_STATE_TTL_SECONDS
         )
-        return RedirectResponse(url=auth_data["url"], status_code=307)
+        redirect = RedirectResponse(url=auth_data["url"], status_code=307)
+        redirect.set_cookie(
+            OAUTH_STATE_COOKIE_NAME,
+            auth_data["state"],
+            max_age=OAUTH_STATE_TTL_SECONDS,
+            httponly=True,
+            secure=session_manager.cookie_secure,
+            samesite="lax",
+            path=session_manager.cookie_path,
+        )
+        return redirect
 
     @router.get("/{provider}/callback")
     async def callback(
@@ -95,10 +113,15 @@ def build_oauth_router(
         user, start a session, and 307-redirect to the validated target.
 
         Note:
-            The state is consumed with an atomic ``get_and_delete`` so two
-            concurrent callbacks can't both redeem the same state+code pair.
+            The ``state`` must match the browser-bound cookie set at
+            ``authorize`` (login-CSRF / fixation defense), and is then consumed
+            with an atomic ``get_and_delete`` so two concurrent callbacks can't
+            both redeem the same state+code pair.
         """
         prov = _provider(provider)
+        bound = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
+        if not bound or bound != state:
+            raise BadRequestException("Invalid or expired OAuth state")
         state_data = await state_storage.get_and_delete(state, OAuthState)
         if state_data is None or state_data.provider != provider:
             raise BadRequestException("Invalid or expired OAuth state")
@@ -124,6 +147,7 @@ def build_oauth_router(
         redirect_url = _safe_redirect(state_data.redirect_to)
         redirect = RedirectResponse(url=redirect_url, status_code=307)
         session_manager.set_session_cookies(redirect, session_id, csrf)
+        redirect.delete_cookie(OAUTH_STATE_COOKIE_NAME, path=session_manager.cookie_path)
 
         await runtime.hooks.run_after_login(
             runtime.repo.to_dict(user),

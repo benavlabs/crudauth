@@ -94,3 +94,24 @@ async def test_full_oauth_callback_creates_user_and_session(client) -> None:
 async def test_invalid_state_rejected(client) -> None:
     r = await client.get("/oauth/stub/callback?code=abc&state=nope")
     assert r.status_code == 400
+
+
+async def test_authorize_sets_state_binding_cookie(client) -> None:
+    r = await client.get("/oauth/stub/authorize")
+    set_cookie = " ".join(r.headers.get_list("set-cookie"))
+    assert "oauth_state=" in set_cookie
+    assert "httponly" in set_cookie.lower()
+
+
+async def test_callback_requires_browser_bound_state(client) -> None:
+    # browser A starts the flow: state stored server-side + binder cookie set on A
+    r = await client.get("/oauth/stub/authorize?redirect_to=/dashboard")
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+
+    # a different browser (no binder cookie) replays the captured callback URL
+    client.cookies.clear()
+    r = await client.get(f"/oauth/stub/callback?code=abc&state={state}")
+    assert r.status_code == 400  # valid server-side state, but not bound to this browser
+
+    # /me confirms no session was established for the would-be victim
+    assert (await client.get("/me")).status_code == 401
