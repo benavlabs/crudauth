@@ -56,6 +56,19 @@ class RedisBackend(RateLimiterBackend):
             await self.client.expire(k, expiry)
         return value
 
+    async def increment_and_refresh_ttl(
+        self, key: str, amount: int = 1, expiry: int | None = None
+    ) -> int:
+        """Increment and re-arm the TTL atomically (``INCRBY`` + ``EXPIRE`` in one
+        pipeline), so a concurrent attempt can't interleave between them."""
+        k = self._k(key)
+        async with self.client.pipeline(transaction=True) as pipe:
+            pipe.incrby(k, amount)
+            if expiry is not None:
+                pipe.expire(k, expiry)
+            results = await pipe.execute()
+        return int(results[0])
+
     async def get_count(self, key: str) -> int | None:
         raw = await self.client.get(self._k(key))
         return int(raw) if raw is not None else None

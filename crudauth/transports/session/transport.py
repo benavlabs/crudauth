@@ -5,7 +5,7 @@ CSRF synchronizer-token, login lockout, secure cookies, and ``/login`` ``/logout
 """
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
@@ -62,6 +62,11 @@ class SessionTransport(Transport):
         csrf: Enforce the synchronizer-token header on unsafe methods (default ``True``).
         cookies: Per-transport [CookieConfig][crudauth.core.CookieConfig] override.
         login_max_attempts: Failed logins before the escalating lockout trips.
+        on_login_success: What a successful login clears - ``"clear_all"`` (default)
+            or ``"clear_user_only"`` (keeps per-IP pressure; only safe when the
+            per-IP key identifies an individual client, not a shared NAT/CGNAT
+            egress). Governs the shared lockout (both ``/login`` and ``/token``).
+            See [LockoutPolicy][crudauth.ratelimit.policy.LockoutPolicy].
 
     Example:
         ```python
@@ -89,6 +94,7 @@ class SessionTransport(Transport):
         login_attempt_window_seconds: int = DEFAULT_LOGIN_ATTEMPT_WINDOW_SECONDS,
         login_lockout_base_seconds: int = DEFAULT_LOGIN_LOCKOUT_BASE_SECONDS,
         login_lockout_max_seconds: int = DEFAULT_LOGIN_LOCKOUT_MAX_SECONDS,
+        on_login_success: Literal["clear_all", "clear_user_only"] = "clear_all",
     ):
         self.backend = backend
         self.redis_url = redis_url
@@ -102,6 +108,7 @@ class SessionTransport(Transport):
         self.login_attempt_window_seconds = login_attempt_window_seconds
         self.login_lockout_base_seconds = login_lockout_base_seconds
         self.login_lockout_max_seconds = login_lockout_max_seconds
+        self.on_login_success = on_login_success
         self.manager: SessionManager | None = None
 
     # --- wiring --------------------------------------------------------------

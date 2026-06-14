@@ -45,6 +45,21 @@ class RateLimiterBackend(ABC):
         """
 
     @abstractmethod
+    async def increment_and_refresh_ttl(
+        self, key: str, amount: int = 1, expiry: int | None = None
+    ) -> int:
+        """Increment ``key`` and (re-)arm its TTL on **every** call, atomically.
+
+        The counterpart to [increment][crudauth.ratelimit.base.RateLimiterBackend.increment]'s
+        first-touch-only TTL: this slides the expiry forward on each call, for a
+        counter that must live as long as activity continues - the lockout
+        escalation "rounds" counter, so a slow, paced attack can't let it expire
+        and reset the backoff. The increment and the TTL re-arm MUST be atomic
+        (one round trip on a networked backend) so a concurrent attempt can't
+        interleave between them.
+        """
+
+    @abstractmethod
     async def get_count(self, key: str) -> int | None:
         """Current counter value, or ``None`` if the key is absent."""
 

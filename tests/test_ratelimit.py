@@ -21,7 +21,7 @@ from crudauth.ratelimit import (
     redis_rate_limiter,
 )
 from crudauth.ratelimit.base import RateLimiterBackend
-from crudauth.ratelimit.constants import MEMORY_SWEEP_EVERY_INCREMENTS
+from crudauth.ratelimit.constants import LOCKOUT_NAMESPACE, MEMORY_SWEEP_EVERY_INCREMENTS
 
 
 def _fakeredis_client():
@@ -335,3 +335,55 @@ async def test_user_keyed_rate_limit_shares_authentication(
         assert r.status_code == 200
         assert calls["n"] == 1  # one shared auth, not one per dependency
     await auth.shutdown()
+
+
+# --- #16: escalation memory survives a paced, sustained attack ----------------
+async def test_escalation_survives_paced_attack(monkeypatch) -> None:
+    # The rounds counter's TTL is re-armed on every lockout, so an attack paced
+    # to span > round_retention keeps climbing the backoff instead of resetting.
+    import crudauth.ratelimit.backends.memory as mem
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(mem.time, "monotonic", lambda: clock["t"])
+
+    b = MemoryRateLimiterBackend()
+    pol = LockoutPolicy(
+        b,
+        max_attempts=1,
+        attempt_window_seconds=100_000,  # attempt counters never expire during the test
+        lockout_base_seconds=10,
+        lockout_max_seconds=10_000,
+        round_retention_seconds=100,
+    )
+
+    async def attempt() -> int:
+        _, _, retry_after = await pol.check_and_record("1.1.1.1", "v", success=False)
+        return retry_after
+
+    assert await attempt() == 0  # under the cap
+    assert await attempt() == 10  # round 0 lockout (base)
+    clock["t"] += 55  # past the 10s lock, within the 100s rounds window
+    assert await attempt() == 20  # round 1 (escalated); re-arms rounds TTL
+    clock["t"] += 65  # now t=1120 > the ORIGINAL 1100 rounds expiry
+    # without the re-arm the rounds counter would have expired and reset to base
+    assert await attempt() == 40  # round 2 - escalation memory survived
+
+
+# --- #17: on_login_success governs the per-IP pressure valve ------------------
+async def test_clear_user_only_keeps_ip_pressure() -> None:
+    b = MemoryRateLimiterBackend()
+    pol = LockoutPolicy(b, max_attempts=3, on_login_success="clear_user_only")
+    for _ in range(3):
+        await pol.check_and_record("10.0.0.1", "attacker", success=False)
+    await pol.check_and_record("10.0.0.1", "neighbor", success=True)  # co-located success
+    assert await b.get_count(f"{LOCKOUT_NAMESPACE}:ip:10.0.0.1") is not None  # per-IP kept
+    assert await b.get_count(f"{LOCKOUT_NAMESPACE}:user:neighbor") is None  # username cleared
+
+
+async def test_clear_all_clears_ip_pressure() -> None:
+    b = MemoryRateLimiterBackend()
+    pol = LockoutPolicy(b, max_attempts=3, on_login_success="clear_all")  # default
+    for _ in range(3):
+        await pol.check_and_record("10.0.0.1", "attacker", success=False)
+    await pol.check_and_record("10.0.0.1", "neighbor", success=True)
+    assert await b.get_count(f"{LOCKOUT_NAMESPACE}:ip:10.0.0.1") is None  # per-IP cleared too

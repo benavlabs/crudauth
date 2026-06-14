@@ -231,6 +231,7 @@ class CRUDAuth:
             lockout_max_seconds=(
                 st.login_lockout_max_seconds if st else DEFAULT_LOGIN_LOCKOUT_MAX_SECONDS
             ),
+            on_login_success=st.on_login_success if st else "clear_all",
             fail_open=False,
         )
 
