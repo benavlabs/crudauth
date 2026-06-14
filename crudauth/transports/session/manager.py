@@ -142,7 +142,9 @@ class SessionManager:
             return None
         now = _utcnow()
         if self._is_idle_expired(session, now):
-            await self.terminate_session(session_id, reason="session_timeout")
+            await self.terminate_session(
+                session_id, reason="session_timeout", user_id=session.user_id
+            )
             return None
         if update_activity:
             session.last_activity = now
