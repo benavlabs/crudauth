@@ -26,6 +26,7 @@ from .config import EmailConfig
 from .constants import (
     CHANGE,
     CHANGE_ACTION,
+    EXISTING_ACCOUNT_ACTION,
     RESET,
     RESET_ACTION,
     EmailKind,
@@ -140,7 +141,15 @@ class EmailFlowService:
             Uses ``kind="existing_account"`` - a security notice, distinct from
             the ``welcome`` template, so the adapter doesn't render a cheery
             greeting to someone who already has an account.
+
+        Note:
+            Subject to the same silent per-target throttle as the other flows, so
+            a register-spray (the per-IP limit is spoofable) can't email-bomb a
+            victim's address. A throttled send is a silent no-op - the route
+            still returns its uniform response, preserving non-enumeration.
         """
+        if not await self._email_within_limit(EXISTING_ACCOUNT_ACTION, email):
+            return
         await self.config.sender.send(
             to=email,
             subject=SUBJECT_EXISTING_ACCOUNT,

@@ -58,6 +58,23 @@ async def test_per_email_limit_is_silent(sessionmaker, UserModel) -> None:
     assert len(sender.sent) == 1
 
 
+async def test_existing_account_notice_is_throttled(UserModel) -> None:
+    # the register "you already have an account" notice is silently per-target
+    # throttled too, so a register-spray can't email-bomb a victim's address.
+    sender = Capture()
+    svc = EmailFlowService(
+        repo=UserRepository(UserModel),
+        secret_key="test-secret-key-0123456789-0123456789",
+        config=EmailConfig(sender=sender, frontend_url="https://app"),
+        hooks=AuthHooks(),
+        rate_limiter=MemoryRateLimiterBackend(),
+        rate_limits={"existing_account_notice": RateLimit(1, 3600)},
+    )
+    await svc.notify_existing_account("v@x.com")  # 1st: sends
+    await svc.notify_existing_account("v@x.com")  # 2nd: over cap → silent no-op
+    assert len(sender.sent) == 1
+
+
 # =============================================================================
 # Per-IP edge limit on a trigger endpoint (raises 429)
 # =============================================================================

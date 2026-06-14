@@ -20,6 +20,7 @@ EMAIL_KINDS: tuple[EmailKind, ...] = get_args(EmailKind)
 VERIFY_ACTION = "email_verify_request"
 RESET_ACTION = "password_reset_request"
 CHANGE_ACTION = "email_change_request"
+EXISTING_ACCOUNT_ACTION = "existing_account_notice"
 
 # Default frontend paths the signed-token links point at.
 DEFAULT_VERIFY_PATH = "/verify-email"
