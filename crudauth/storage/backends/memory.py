@@ -128,9 +128,13 @@ class MemorySessionStorage(AbstractSessionStorage[T]):
         Note:
             Reads the ``user_id`` field straight out of the serialized payload
             (the storage layer is model-agnostic, so it can't go through the
-            model). Meaningful only for ``user_id``-bearing models; entries
-            without that field are skipped.
+            model). The comparison is on the *stringified* id, matching how the
+            Redis backend keys its per-user index - so a UUID PK (which a JSON
+            round-trip turns into a string) still matches the ``UUID`` object the
+            caller passes. Meaningful only for ``user_id``-bearing models;
+            entries without that field are skipped.
         """
+        target = str(user_id)
         sessions: list[str] = []
         for key in list(self.data.keys()):
             if self._check_expiry(key):
@@ -139,8 +143,9 @@ class MemorySessionStorage(AbstractSessionStorage[T]):
                 payload = json.loads(self.data[key])
             except Exception:
                 continue
-            if isinstance(payload, dict) and payload.get("user_id") == user_id:
-                sessions.append(key[len(self.prefix) :])
+            if isinstance(payload, dict) and "user_id" in payload:
+                if str(payload["user_id"]) == target:
+                    sessions.append(key[len(self.prefix) :])
         return sessions
 
     async def delete_pattern(self, pattern: str) -> int:

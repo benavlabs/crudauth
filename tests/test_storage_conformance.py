@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import AsyncIterator
 
 import fakeredis.aioredis
@@ -66,6 +67,15 @@ async def test_get_user_sessions(storage) -> None:
     await storage.create(SessionData(user_id=8), session_id="c")
     ids = set(await storage.get_user_sessions(7))
     assert ids == {"a", "b"}
+
+
+async def test_get_user_sessions_uuid_pk(storage) -> None:
+    # a UUID PK survives the JSON round-trip (stringified) and still matches the
+    # UUID object the caller passes - on both backends.
+    uid = uuid.uuid4()
+    await storage.create(SessionData(user_id=uid), session_id="a")
+    await storage.create(SessionData(user_id=uuid.uuid4()), session_id="b")
+    assert set(await storage.get_user_sessions(uid)) == {"a"}
 
 
 async def test_delete_with_user_id_updates_index(storage) -> None:
