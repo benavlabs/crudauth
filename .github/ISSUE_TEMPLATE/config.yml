@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/benavlabs/crudauth/security/advisories/new
+    about: Report privately via a GitHub Security Advisory, or email igor@benav.io. Do not open a public issue.
+  - name: Questions and discussion (Discord)
+    url: https://discord.com/invite/TEmPs22gqB
+    about: Ask questions and chat with the community.
+  - name: Documentation
+    url: https://benavlabs.github.io/crudauth
+    about: Read the docs before filing an issue.
