@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Docs build output (zensical)
+site/
+
+# Banner/diagram build scripts + artifacts (rendered PNGs in docs/assets/ are committed)
+readme-assets/

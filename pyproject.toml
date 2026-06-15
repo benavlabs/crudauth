@@ -54,6 +54,15 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.9.0",
 ]
+docs = [
+    "zensical>=0.0.15",
+    "mkdocstrings[python]>=1.0,<2",
+    "mkdocs-autorefs>=1.0,<2",
+    # optional runtime deps so mkdocstrings can import every submodule for autodoc
+    "httpx>=0.24.0",
+    "redis>=5.0.0",
+    "user-agents>=2.2.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.10.11,<0.11.0"]

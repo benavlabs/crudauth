@@ -1,4 +1,11 @@
-<h1 align="center">crudauth</h1>
+<p align="center">
+  <a href="https://github.com/benavlabs/crudauth">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/crudauth-cover-dark.png">
+      <img src="docs/assets/crudauth-cover-light.png" alt="crudauth" width="50%">
+    </picture>
+  </a>
+</p>
 <p align="center" markdown=1>
   <i><b>Batteries-included, transport-agnostic authentication for FastAPI.</b></i>
 </p>
@@ -27,23 +34,22 @@
 <b>crudauth</b> gives you one <code>CRUDAuth</code> object that wires cookie sessions, JWT bearer tokens, OAuth, and email flows (verify / reset / change) - with CSRF, escalating login lockout, sudo mode, and multi-device session management - over <b>your own</b> SQLAlchemy <code>User</code> model. App policy lives in hooks, not in forked dependency code. Sessions and bearer both resolve to the same <code>Principal</code>, so narrowing or adding a transport never changes how you authorize a route.
 </p>
 
-<p><i>Part of the Benav Labs FastAPI family - pairs with <a href="https://github.com/benavlabs/fastcrud">FastCRUD</a> (CRUD &amp; endpoints) and <a href="https://github.com/benavlabs/crudadmin">CRUDAdmin</a> (admin UI).</i></p>
 <hr>
 
-> **Status:** early `0.2` (alpha) — this is the v1 surface we're converging on. APIs may still shift before `1.0`.
+> **Status:** early `0.2` (alpha) - this is the v1 surface we're converging on. APIs may still shift before `1.0`.
 
 ## Features
 
-- 🔀 **Transport-agnostic**: cookie sessions and JWT bearer tokens behind a single `Principal`; first credential present wins, and authorization code never depends on *which* transport authenticated.
-- 🪪 **Your model, your schema**: works over your existing SQLAlchemy `User` via a logical-field `column_map` — no forced renames, no second user table.
-- 🛡️ **Secure by default**: synchronizer-token CSRF, escalating per-IP/per-user login lockout, bcrypt with SHA-256 pre-hash (no 72-byte truncation), timing-equalized login, and trusted-proxy IP resolution.
-- 🌐 **OAuth**: Google, GitHub, or a custom provider — with the `state` bound to the initiating browser to block login CSRF.
-- ✉️ **Email flows**: verify / reset / change — you implement the `EmailSender` port, the package mints and verifies the signed, single-use tokens.
-- 🔼 **Sudo mode**: short-lived re-authentication to gate sensitive actions, stamped on the session and cleared on logout.
-- 🖥️ **Multi-device sessions**: list, revoke one, or "sign out everywhere", with a configurable per-user session cap.
-- 🧩 **App policy in hooks**: `AuthHooks` for welcome email, trial grant, audit logging — fired uniformly across every auth path.
-- 🔁 **Pluggable backends**: in-memory for dev, Redis for production — for sessions, CSRF, lockout counters, and one-time tokens.
-- ⌨️ **Fully typed & async**: ships `py.typed`, built on SQLAlchemy 2.0 and Pydantic v2.
+- **Transport-agnostic**: cookie sessions and JWT bearer tokens behind a single `Principal`; first credential present wins, and authorization code never depends on *which* transport authenticated.
+- **Your model, your schema**: works over your existing SQLAlchemy `User` via a logical-field `column_map` - no forced renames, no second user table.
+- **Secure by default**: synchronizer-token CSRF, escalating per-IP/per-user login lockout, bcrypt with SHA-256 pre-hash (no 72-byte truncation), timing-equalized login, and trusted-proxy IP resolution.
+- **OAuth**: Google, GitHub, or a custom provider - with the `state` bound to the initiating browser to block login CSRF.
+- **Email flows**: verify / reset / change - you implement the `EmailSender` port, the package mints and verifies the signed, single-use tokens.
+- **Sudo mode**: short-lived re-authentication to gate sensitive actions, stamped on the session and cleared on logout.
+- **Multi-device sessions**: list, revoke one, or "sign out everywhere", with a configurable per-user session cap.
+- **App policy in hooks**: `AuthHooks` for welcome email, trial grant, audit logging - fired uniformly across every auth path.
+- **Pluggable backends**: in-memory for dev, Redis for production - for sessions, CSRF, lockout counters, and one-time tokens.
+- **Fully typed & async**: ships `py.typed`, built on SQLAlchemy 2.0 and Pydantic v2.
 
 ## Requirements
 
@@ -65,7 +71,7 @@ uv add crudauth
 
 ## Quickstart
 
-Sessions are the default — no `transports=` needed. You get cookie auth, CSRF,
+Sessions are the default - no `transports=` needed. You get cookie auth, CSRF,
 login lockout, secure cookies, and `/login` `/logout` `/register` `/me`.
 
 ```python
@@ -108,7 +114,7 @@ auth = CRUDAuth(
 )
 ```
 
-## Protecting routes — one factory, every case a kwarg
+## Protecting routes - one factory, every case a kwarg
 
 ```python
 auth.current_user()                              # required, 401 if anon
@@ -139,12 +145,12 @@ auth = CRUDAuth(
 ```
 
 When both credentials are present, the **first transport in the list wins**.
-CSRF is a property of the session transport — it appears only where sessions do,
+CSRF is a property of the session transport - it appears only where sessions do,
 never on bearer/api-key paths.
 
 ## Storage & lifespan
 
-Server-side backends open connections on startup — call `initialize()` /
+Server-side backends open connections on startup - call `initialize()` /
 `shutdown()` in your lifespan:
 
 ```python
@@ -159,7 +165,7 @@ async def lifespan(app: FastAPI):
 
 See the usage cookbook for OAuth (Google / GitHub / custom providers), email
 flows (implement the `EmailSender` port; the package mints/verifies the signed
-tokens), lifecycle hooks (`AuthHooks` — welcome email, trial grant, audit log),
+tokens), lifecycle hooks (`AuthHooks` - welcome email, trial grant, audit log),
 sudo mode (`sudo=SudoConfig()` + `auth.require_sudo()`), and dropping to
 primitives.
 
@@ -167,7 +173,7 @@ primitives.
 
 crudauth is ports-and-adapters with feature slices and a single composition
 root (`CRUDAuth`). The layering and the import-direction rules live in
-[`crudauth/ARCHITECTURE.md`](crudauth/ARCHITECTURE.md) — read it before adding a
+[`crudauth/ARCHITECTURE.md`](crudauth/ARCHITECTURE.md) - read it before adding a
 transport, OAuth provider, or storage backend; each is meant to be a drop-in
 file, not a cross-cutting edit.
 
@@ -179,9 +185,18 @@ file, not a cross-cutting edit.
 
 Benav Labs – [benav.io](https://benav.io), [Discord](https://discord.com/invite/TEmPs22gqB)
 
+## The Benav Labs FastAPI family
+
+crudauth is part of a family of composable FastAPI building blocks - use whichever you need:
+
+- **[FastCRUD](https://github.com/benavlabs/fastcrud)** - powerful CRUD methods and automatic endpoint creation for your SQLAlchemy models.
+- **[CRUDAdmin](https://github.com/benavlabs/crudadmin)** - a modern, secure admin interface generated straight from your models.
+- **[Fastro (FastAPI-boilerplate)](https://github.com/benavlabs/FastAPI-boilerplate)** - a batteries-included FastAPI starter: auth, CRUD, jobs, caching, and rate-limits.
+- **[FastroAI](https://fastro.ai)** - the complete FastAPI SaaS template: payments, entitlements, email, a frontend, and AI agents.
+
 ## Build a full SaaS on FastAPI
 
-crudauth handles authentication in **[FastroAI](https://fastro.ai)** — the complete FastAPI SaaS template: auth, Stripe payments (subscriptions, credits, discounts), entitlements, transactional email, an Astro frontend, and PydanticAI agents, wired together and production-ready.
+crudauth handles authentication in **[FastroAI](https://fastro.ai)** - the complete FastAPI SaaS template: auth, Stripe payments (subscriptions, credits, discounts), entitlements, transactional email, an Astro frontend, and PydanticAI agents, wired together and production-ready.
 
 <p align="center">
   <a href="https://fastro.ai">
