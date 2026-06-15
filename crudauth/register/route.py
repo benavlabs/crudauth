@@ -13,11 +13,11 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.exc import IntegrityError
 
-from .constants import MIN_PASSWORD_LENGTH
-from .exceptions import DuplicateValueException
-from .hooks import HookContext
-from .ratelimit import KeyBy
-from .utils import get_client_ip, get_password_hash
+from ..constants import MIN_PASSWORD_LENGTH
+from ..exceptions import DuplicateValueException
+from ..hooks import HookContext
+from ..ratelimit import KeyBy
+from ..utils import get_client_ip, get_password_hash
 
 __all__ = ["RegisterIn", "build_register_route"]
 
@@ -47,7 +47,7 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
 
     Args:
         auth: The owning [CRUDAuth][crudauth.crud_auth.CRUDAuth] (repo, hooks, rate limit, ...).
-        schema: Custom request body, or ``None`` to use [RegisterIn][crudauth._register.RegisterIn].
+        schema: Custom request body, or ``None`` to use [RegisterIn][crudauth.register.route.RegisterIn].
 
     Returns:
         An `APIRouter` with the ``POST /register`` route.

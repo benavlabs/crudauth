@@ -81,3 +81,22 @@ async def test_increment_token_version_noop_without_column(session) -> None:
     assert repo.token_version(acct) == 0
     await repo.increment_token_version(session, acct)  # no column → no error, no change
     assert repo.token_version(acct) == 0
+
+
+# --- token_version on a model that *has* the column (conftest UserModel) ------
+async def test_token_version_increments(sessionmaker, UserModel) -> None:
+    repo = UserRepository(UserModel)
+    async with sessionmaker() as db:
+        user = await repo.create(
+            db, {"email": "tv@x.com", "username": "tv", "hashed_password": "h"}
+        )
+        assert repo.token_version(user) == 0
+        await repo.increment_token_version(db, user)
+        assert repo.token_version(user) == 1
+
+
+def test_column_map_translation(UserModel) -> None:
+    repo = UserRepository(UserModel, column_map={"email": "email", "id": "id"})
+    assert repo.col("email") == "email"
+    repo2 = UserRepository(UserModel, column_map={"hashed_password": "email"})
+    assert repo2.col("hashed_password") == "email"

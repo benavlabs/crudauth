@@ -81,10 +81,6 @@ REGISTRATION_ALLOWED_FIELDS = frozenset({"email", "username"})
 # unconditionally so an opt-in typo can't re-open privilege escalation.
 REGISTRATION_GATED_FIELDS = frozenset(LOGICAL_FIELDS) - REGISTRATION_ALLOWED_FIELDS
 
-# --- registration throttle ----------------------------------------------
-REGISTER_MAX_ATTEMPTS = 5
-REGISTER_WINDOW_SECONDS = 10 * SECONDS_PER_MINUTE
-
 # --- email-flow throttle -------------------------------------------------
 # Per-target-email cap (in the service) stops email-bombing a victim even from
 # rotating IPs; per-IP cap (at the edge) stops one caller spraying many addresses.

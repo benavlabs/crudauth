@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Callable, Sequence
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
-from ._register import build_register_route
+from .register import build_register_route
 from .constants import (
     DEFAULT_ALGORITHM,
     DEFAULT_LOGIN_ATTEMPT_WINDOW_SECONDS,
