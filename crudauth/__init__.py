@@ -15,6 +15,8 @@ Quickstart:
 
 from __future__ import annotations
 
+from importlib.metadata import version
+
 from .core import AuthContext, CookieConfig, Transport
 from .email import EmailConfig, EmailSender
 from .exceptions import (
@@ -35,9 +37,10 @@ from .principal import Principal
 from .sudo import SudoConfig
 from .transports import BearerTransport, SessionTransport
 
-__version__ = "0.1.0"
+__version__ = version("crudauth")
 
 __all__ = [
+    "__version__",
     "CRUDAuth",
     "Principal",
     "SessionTransport",
