@@ -3,7 +3,7 @@
 The *required* surface is a dumb counter - five abstract methods plus an
 overridable ``get_ttl``. The fixed-window check ([increment_and_check][crudauth.ratelimit.base.RateLimiterBackend.increment_and_check])
 is provided once on the base class over that counter, so a third backend is a
-handful of trivial methods, not a window-math reimplementation (Convention 15).
+handful of trivial methods, not a window-math reimplementation.
 """
 
 from __future__ import annotations
@@ -42,6 +42,21 @@ class RateLimiterBackend(ABC):
             would push the TTL forward forever and a fixed window would never
             close. Both in-tree backends honor this (Redis: ``value == amount``;
             memory: key absent from the deadline map); a new backend must too.
+        """
+
+    @abstractmethod
+    async def increment_and_refresh_ttl(
+        self, key: str, amount: int = 1, expiry: int | None = None
+    ) -> int:
+        """Increment ``key`` and (re-)arm its TTL on **every** call, atomically.
+
+        The counterpart to [increment][crudauth.ratelimit.base.RateLimiterBackend.increment]'s
+        first-touch-only TTL: this slides the expiry forward on each call, for a
+        counter that must live as long as activity continues - the lockout
+        escalation "rounds" counter, so a slow, paced attack can't let it expire
+        and reset the backoff. The increment and the TTL re-arm MUST be atomic
+        (one round trip on a networked backend) so a concurrent attempt can't
+        interleave between them.
         """
 
     @abstractmethod

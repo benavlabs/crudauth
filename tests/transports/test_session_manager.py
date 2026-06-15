@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from starlette.requests import Request
 
 from crudauth.ratelimit import LockoutPolicy, MemoryRateLimiterBackend
 from crudauth.storage import MemorySessionStorage, get_session_storage
+from crudauth.storage.base import AbstractSessionStorage
 from crudauth.transports.session import SessionManager
+from crudauth.transports.session.constants import CSRF_TOKEN_ID_META_KEY
 from crudauth.transports.session.schemas import SessionData
 
 
@@ -37,6 +41,41 @@ async def test_create_and_validate() -> None:
     assert session.user_id == 1
     assert await mgr.validate_csrf_token(sid, csrf) is True
     assert await mgr.validate_csrf_token(sid, "bogus") is False
+
+
+async def test_regenerate_csrf_rotates() -> None:
+    mgr = build_manager()
+    sid, old = await mgr.create_session(make_request(), user_id=1)
+    assert await mgr.validate_csrf_token(sid, old) is True
+
+    new = await mgr.regenerate_csrf_token(user_id=1, session_id=sid)
+    assert new and new != old
+    # old token is invalidated, new token is accepted
+    assert await mgr.validate_csrf_token(sid, old) is False
+    assert await mgr.validate_csrf_token(sid, new) is True
+    # the session now points at the NEW token (so its TTL is what slides)
+    session = await mgr.storage.get(sid, SessionData)
+    assert session is not None
+    assert session.metadata[CSRF_TOKEN_ID_META_KEY] == new
+
+
+async def test_regenerate_csrf_missing_session_returns_empty() -> None:
+    mgr = build_manager()
+    assert await mgr.regenerate_csrf_token(user_id=1, session_id="nope") == ""
+
+
+async def test_validate_session_evicts_idle_on_read() -> None:
+    # the load-bearing guarantee now that the per-request sweep is gone:
+    # validate_session catches an idle-expired session and terminates it.
+    mgr = build_manager()
+    sid, _ = await mgr.create_session(make_request(), user_id=1)
+    session = await mgr.storage.get(sid, SessionData)
+    assert session is not None
+    session.last_activity = session.last_activity - timedelta(days=999)  # force past idle window
+    await mgr.storage.update(sid, session)
+
+    assert await mgr.validate_session(sid) is None  # rejected on read
+    assert await mgr.storage.get(sid, SessionData) is None  # and terminated, not left dangling
 
 
 async def test_revoke() -> None:
@@ -102,11 +141,9 @@ async def test_memory_storage_crud() -> None:
 
 
 async def test_minimal_backend_degrades_gracefully() -> None:
-    # #4: a BYO backend that implements only the core surface (no
+    # a BYO backend that implements only the core surface (no
     # get_user_sessions / scan_keys) must degrade - not crash - disabling
     # multi-device listing and the idle sweep rather than raising.
-    from crudauth.storage.base import AbstractSessionStorage
-
     class MinimalStorage(AbstractSessionStorage[SessionData]):
         def __init__(self) -> None:
             super().__init__()

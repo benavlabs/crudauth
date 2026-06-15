@@ -1,4 +1,4 @@
-"""Optional custom registration schema: extra fields are persisted (not required)."""
+"""Optional custom registration schema: opted-in extra fields persist (not required)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from crudauth import CookieConfig, CRUDAuth, SessionTransport
+from crudauth.repository import UserRepository
 
 
 class RegisterWithName(BaseModel):
@@ -22,9 +23,10 @@ async def ctx(get_session, UserModel, sessionmaker):
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         register_schema=RegisterWithName,
+        register_extra_fields={"full_name"},
     )
     app = FastAPI()
     app.include_router(auth.router)
@@ -49,8 +51,6 @@ async def test_custom_field_persisted(ctx) -> None:
     )
     assert r.status_code == 200, r.text
 
-    from crudauth.repository import UserRepository
-
     repo = UserRepository(UserModel)
     async with sessionmaker() as db:
         user = await repo.get_by_email(db, "a@x.com")
@@ -73,7 +73,7 @@ async def test_default_schema_still_works(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()

@@ -12,6 +12,7 @@ from ..constants import (
     GITHUB_EMAILS_ENDPOINT,
     GITHUB_TOKEN_ENDPOINT,
     GITHUB_USERINFO_ENDPOINT,
+    OAUTH_HTTP_TIMEOUT_SECONDS,
 )
 from ..provider import AbstractOAuthProvider, _require_httpx
 from ..schemas import OAuthUserInfo
@@ -68,7 +69,7 @@ class GitHubOAuthProvider(AbstractOAuthProvider):
     async def get_user_info(self, access_token: str) -> dict[str, Any]:
         profile = await super().get_user_info(access_token)
         httpx = _require_httpx()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=OAUTH_HTTP_TIMEOUT_SECONDS) as client:
             resp = await client.get(
                 GITHUB_EMAILS_ENDPOINT,
                 headers={

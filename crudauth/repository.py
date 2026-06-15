@@ -14,46 +14,34 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .constants import (
+    LOGICAL_FIELDS,
+    REGISTRATION_ALLOWED_FIELDS,
+    REGISTRATION_GATED_FIELDS,
+)
 from .utils import canonical_email
 
-__all__ = ["UserRepository", "LOGICAL_FIELDS", "REGISTRATION_ALLOWED_FIELDS"]
+__all__ = [
+    "UserRepository",
+    "LOGICAL_FIELDS",
+    "REGISTRATION_ALLOWED_FIELDS",
+    "REGISTRATION_GATED_FIELDS",
+]
 
 # Sentinel: a value that could not be coerced to the PK type (so no row matches).
 _UNCOERCIBLE = object()
 
-# Logical field names crudauth understands.
-LOGICAL_FIELDS = (
-    "id",
-    "email",
-    "username",
-    "hashed_password",
-    "is_active",
-    "is_superuser",
-    "email_verified",
-    "oauth_provider",
-    "google_id",
-    "github_id",
-    "oauth_created_at",
-    "oauth_updated_at",
-)
-
-# The ONLY logical fields a user may set during self-registration. Everything
-# else in LOGICAL_FIELDS is privilege/state/identity-linkage (is_superuser,
-# is_active, email_verified, hashed_password, the oauth linkage, the PK) and is
-# dropped at the registration path. This is an *allowlist* on purpose: adding a
-# new sensitive column to your model later fails safe (not settable at signup)
-# rather than fails open. ``password`` is plaintext input, not a logical column,
-# so it isn't here - it's hashed into ``hashed_password`` by the route.
-REGISTRATION_ALLOWED_FIELDS = frozenset({"email", "username"})
-
-# Logical fields that registration must never accept (the gated set).
-REGISTRATION_GATED_FIELDS = frozenset(LOGICAL_FIELDS) - REGISTRATION_ALLOWED_FIELDS
-
 
 class UserRepository:
-    def __init__(self, model: type[Any], column_map: dict[str, str] | None = None):
+    def __init__(
+        self,
+        model: type[Any],
+        column_map: dict[str, str] | None = None,
+        register_extra_fields: Iterable[str] | None = None,
+    ):
         self.model = model
         self.column_map = column_map or {}
+        self.register_extra_fields = frozenset(register_extra_fields or ())
 
     # --- contract translation ------------------------------------------------
     def col(self, logical: str) -> str:
@@ -61,12 +49,15 @@ class UserRepository:
         return self.column_map.get(logical, logical)
 
     def has(self, logical: str) -> bool:
+        """Whether the model actually has the column for ``logical``."""
         return hasattr(self.model, self.col(logical))
 
     def get(self, user: Any, logical: str, default: Any = None) -> Any:
+        """Read a logical field off ``user``, or ``default`` if the column is absent."""
         return getattr(user, self.col(logical), default)
 
     def set_field(self, user: Any, logical: str, value: Any) -> None:
+        """Set a logical field on ``user`` by its resolved column name."""
         setattr(user, self.col(logical), value)
 
     def _attr(self, logical: str) -> Any:
@@ -160,24 +151,48 @@ class UserRepository:
         """
         return set(REGISTRATION_GATED_FIELDS) | {self.col(g) for g in REGISTRATION_GATED_FIELDS}
 
+    def _allowed_register_names(self) -> set[str]:
+        """Names registration may keep: the base allowlist plus opted-in extras,
+        by both logical and mapped column name."""
+        allowed = set(REGISTRATION_ALLOWED_FIELDS) | set(self.register_extra_fields)
+        return allowed | {self.col(a) for a in allowed}
+
     def gated_register_fields(self, schema_fields: Iterable[str]) -> set[str]:
-        """Which of ``schema_fields`` registration will drop (logical or mapped name)."""
+        """Which of ``schema_fields`` are crudauth privileged fields (always dropped)."""
         gated = self._gated_names()
         return {f for f in schema_fields if f in gated}
 
-    def filter_registration_data(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Strip privileged fields from a registration payload.
+    def droppable_register_fields(self, schema_fields: Iterable[str]) -> set[str]:
+        """Which of ``schema_fields`` map to a real model column but are *not*
+        privileged and *not* opted in, so registration silently drops them.
 
-        A crudauth logical field is kept only if it's in
-        :data:`REGISTRATION_ALLOWED_FIELDS`; gated fields (``is_superuser``,
-        ``hashed_password``, oauth linkage, the PK, ...) are dropped silently -
-        by both their logical name *and* their mapped column name. Non-logical
-        fields (your own columns, e.g. ``full_name``) pass through untouched, so
-        a custom ``register_schema`` can't turn ``/register`` into a
-        privilege-escalation endpoint.
+        These are the fields a developer most likely expects to persist (e.g. a
+        ``full_name`` column they added to ``register_schema``) and won't, until
+        they add the name to ``register_extra_fields``.
         """
+        allowed = self._allowed_register_names()
         gated = self._gated_names()
-        return {k: v for k, v in data.items() if k not in gated}
+        return {
+            f
+            for f in schema_fields
+            if f not in allowed and f not in gated and hasattr(self.model, self.col(f))
+        }
+
+    def filter_registration_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Keep only the allowlisted registration fields; drop everything else.
+
+        A field survives only if it is in :data:`REGISTRATION_ALLOWED_FIELDS` or
+        was opted in via ``register_extra_fields`` (matched by logical *or* mapped
+        column name) - and is never one of crudauth's privileged logical fields
+        (``is_superuser``, ``email_verified``, ``hashed_password``, the oauth
+        linkage, the PK), which stay gated even if mistakenly opted in. Unknown
+        app columns (``role``, ``credits``, ...) are dropped unless explicitly
+        opted in, so a custom ``register_schema`` can't turn ``/register`` into a
+        privilege-escalation or mass-assignment endpoint.
+        """
+        allowed = self._allowed_register_names()
+        gated = self._gated_names()
+        return {k: v for k, v in data.items() if k in allowed and k not in gated}
 
     # --- writes --------------------------------------------------------------
     async def create(self, db: AsyncSession, data: dict[str, Any]) -> Any:
@@ -191,7 +206,7 @@ class UserRepository:
         Note:
             Email is canonicalized off the *resolved* column: ``kwargs`` is keyed
             by actual column names, so a ``column_map`` that renames ``email``
-            would otherwise be stored un-normalized (Convention 5).
+            would otherwise be stored un-normalized.
         """
         kwargs: dict[str, Any] = {}
         for logical, value in data.items():
@@ -237,6 +252,20 @@ class UserRepository:
 
     def user_id(self, user: Any) -> Any:
         return self.get(user, "id")
+
+    def token_version(self, user: Any) -> int:
+        """The user's credential epoch (``0`` if the model has no such column)."""
+        return int(self.get(user, "token_version", 0) or 0)
+
+    async def increment_token_version(self, db: AsyncSession, user: Any) -> None:
+        """Bump the credential epoch, revoking outstanding bearer tokens.
+
+        A no-op when the model has no ``token_version`` column (bearer tokens
+        then simply aren't epoch-revocable; the limitation is documented).
+        """
+        if not self.has("token_version"):
+            return
+        await self.update(db, user, {"token_version": self.token_version(user) + 1})
 
     def to_dict(self, user: Any) -> dict[str, Any]:
         """Project a user row onto the logical contract (for hooks).

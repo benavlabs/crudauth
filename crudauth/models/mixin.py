@@ -22,6 +22,12 @@ def _utcnow() -> datetime:
 class AuthUserMixin:
     """Declarative mixin supplying the full set of columns crudauth relies on.
 
+    Note:
+        ``token_version`` is a monotonic credential epoch: bearer tokens embed it
+        as the ``ver`` claim and a password reset bumps it, so a reset rejects
+        every outstanding bearer token. See
+        [BearerTransport][crudauth.transports.bearer.transport.BearerTransport].
+
     Example:
         ```python
         class User(Base, AuthUserMixin):
@@ -40,6 +46,8 @@ class AuthUserMixin:
     is_active: Mapped[bool] = mapped_column(default=True)
     is_superuser: Mapped[bool] = mapped_column(default=False)
     email_verified: Mapped[bool] = mapped_column(default=False)
+
+    token_version: Mapped[int] = mapped_column(default=0)
 
     # --- oauth linkage -------------------------------------------------------
     oauth_provider: Mapped[str | None] = mapped_column(String(32), default=None)

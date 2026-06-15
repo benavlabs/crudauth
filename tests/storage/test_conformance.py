@@ -1,9 +1,12 @@
-"""C17: every AbstractSessionStorage backend passes the same behavioral suite."""
+"""Every AbstractSessionStorage backend passes the same behavioral suite."""
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from collections.abc import AsyncIterator
 
+import fakeredis.aioredis
 import pytest
 
 from crudauth.storage.backends.memory import MemorySessionStorage
@@ -12,8 +15,6 @@ from crudauth.transports.session.schemas import SessionData
 
 
 def _fakeredis_client():
-    import fakeredis.aioredis
-
     return fakeredis.aioredis.FakeRedis()
 
 
@@ -68,8 +69,17 @@ async def test_get_user_sessions(storage) -> None:
     assert ids == {"a", "b"}
 
 
+async def test_get_user_sessions_uuid_pk(storage) -> None:
+    # a UUID PK survives the JSON round-trip (stringified) and still matches the
+    # UUID object the caller passes - on both backends.
+    uid = uuid.uuid4()
+    await storage.create(SessionData(user_id=uid), session_id="a")
+    await storage.create(SessionData(user_id=uuid.uuid4()), session_id="b")
+    assert set(await storage.get_user_sessions(uid)) == {"a"}
+
+
 async def test_delete_with_user_id_updates_index(storage) -> None:
-    # #2: passing user_id lets delete drop the session from the user index
+    # passing user_id lets delete drop the session from the user index
     # without re-reading the record; the index stays consistent.
     await storage.create(SessionData(user_id=7), session_id="a")
     await storage.create(SessionData(user_id=7), session_id="b")
@@ -82,3 +92,52 @@ async def test_delete_without_user_id_still_updates_index(storage) -> None:
     await storage.create(SessionData(user_id=9), session_id="x")
     assert await storage.delete("x") is True
     assert await storage.get_user_sessions(9) == []
+
+
+async def test_delete_pattern_prefix_semantics(storage) -> None:
+    # both backends: delete_pattern(prefix) removes every key under that prefix
+    # (memory used to be a no-op and diverge from Redis).
+    await storage.create(SessionData(user_id=1), session_id="abc")
+    await storage.create(SessionData(user_id=2), session_id="def")
+    deleted = await storage.delete_pattern("t:")  # the fixture's prefix
+    assert deleted == 2
+    assert await storage.exists("abc") is False
+    assert await storage.exists("def") is False
+
+
+async def test_scan_keys_glob(storage) -> None:
+    await storage.create(SessionData(user_id=1), session_id="abc")
+    assert "t:abc" in await storage.scan_keys("t:*")
+    assert await storage.scan_keys("nomatch:*") == []
+
+
+async def test_set_if_absent_first_wins(storage) -> None:
+    assert await storage.set_if_absent("tok", SessionData(user_id=1), expiration=50) is True
+    # second attempt on the same key loses
+    assert await storage.set_if_absent("tok", SessionData(user_id=2), expiration=50) is False
+    # and the original value is the one that stuck
+    got = await storage.get("tok", SessionData)
+    assert got is not None and got.user_id == 1
+
+
+async def test_set_if_absent_concurrent_single_winner(storage) -> None:
+    results = await asyncio.gather(
+        *[storage.set_if_absent("race", SessionData(user_id=i), expiration=50) for i in range(20)]
+    )
+    assert sum(1 for r in results if r is True) == 1  # exactly one winner
+
+
+async def test_get_and_delete_returns_then_removes(storage) -> None:
+    await storage.create(SessionData(user_id=5), session_id="g")
+    got = await storage.get_and_delete("g", SessionData)
+    assert got is not None and got.user_id == 5
+    assert await storage.exists("g") is False
+    assert await storage.get_and_delete("g", SessionData) is None  # second call: gone
+
+
+async def test_get_and_delete_concurrent_single_consumer(storage) -> None:
+    await storage.create(SessionData(user_id=5), session_id="once")
+    results = await asyncio.gather(
+        *[storage.get_and_delete("once", SessionData) for _ in range(20)]
+    )
+    assert sum(1 for r in results if r is not None) == 1  # consumed exactly once

@@ -33,7 +33,6 @@ class SessionData(BaseModel):
     device_info: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utcnow)
     last_activity: datetime = Field(default_factory=_utcnow)
-    is_active: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

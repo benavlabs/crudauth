@@ -129,6 +129,30 @@ class RedisSessionStorage(AbstractSessionStorage[T]):
     async def exists(self, session_id: str) -> bool:
         return bool(await self.client.exists(self.get_key(session_id)))
 
+    async def set_if_absent(self, session_id: str, data: T, expiration: int | None = None) -> bool:
+        """Atomic create-if-absent via ``SET key value NX EX ttl`` (single round trip)."""
+        ttl = expiration if expiration is not None else self.expiration
+        payload = data.model_dump_json().encode()
+        result = await self.client.set(self.get_key(session_id), payload, ex=ttl, nx=True)
+        return result is not None
+
+    async def get_and_delete(self, session_id: str, model_class: type[T]) -> T | None:
+        """Atomic read-and-delete via a ``MULTI/EXEC`` pipeline (portable; no GETDEL dependency).
+
+        Note:
+            Used for single-use values without a per-user index (OAuth ``state``),
+            so it bypasses the user-index bookkeeping in [delete]
+            [crudauth.storage.backends.redis.RedisSessionStorage.delete].
+        """
+        key = self.get_key(session_id)
+        async with self.client.pipeline(transaction=True) as pipe:
+            pipe.get(key)
+            pipe.delete(key)
+            raw, _ = await pipe.execute()
+        if raw is None:
+            return None
+        return model_class.model_validate_json(raw)
+
     async def get_user_sessions(self, user_id: Any) -> list[str]:
         members = await self.client.smembers(self._user_key(user_id))
         return [m.decode() if isinstance(m, bytes) else m for m in members]

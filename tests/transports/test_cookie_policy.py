@@ -1,4 +1,4 @@
-"""One cookie policy: session and bearer agree on secure/samesite (ledger #9)."""
+"""One cookie policy: session and bearer agree on secure/samesite."""
 
 from __future__ import annotations
 
@@ -19,7 +19,12 @@ def _cookie_attr(response, name, attr) -> str | None:
 
 
 async def _app(get_session, UserModel, **kwargs):
-    auth = CRUDAuth(session=get_session, user_model=UserModel, SECRET_KEY="x", **kwargs)
+    auth = CRUDAuth(
+        session=get_session,
+        user_model=UserModel,
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
+        **kwargs,
+    )
     app = FastAPI()
     app.include_router(auth.router)
     await auth.initialize()

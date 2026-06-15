@@ -1,4 +1,4 @@
-"""OAuth provider normalization + account-service edge cases (review fixes #2,#3,#4,#7)."""
+"""OAuth provider normalization + account-service edge cases."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from crudauth.oauth.providers.google import GoogleOAuthProvider
 from crudauth.repository import UserRepository
 
 
-# --- #2: a missing provider id must raise, not coerce to the string "None" ---
+# --- a missing provider id must raise, not coerce to the string "None" ---
 async def test_google_missing_sub_raises() -> None:
     prov = GoogleOAuthProvider("id", "secret", "http://cb")
     with pytest.raises(HTTPException) as exc:
@@ -36,7 +36,7 @@ async def test_google_uses_real_sub() -> None:
     assert info.email_verified is True
 
 
-# --- #4: GitHub email selection never lets an unverified primary win ----------
+# --- GitHub email selection never lets an unverified primary win ----------
 def test_github_email_prefers_primary_verified() -> None:
     email, verified = _select_github_email(
         [
@@ -69,7 +69,7 @@ def test_github_email_empty() -> None:
     assert _select_github_email([]) == (None, False)
 
 
-# --- #3: creating a NEW account on an unverified email is allowed (not refused),
+# --- creating a NEW account on an unverified email is allowed (not refused),
 #         but the row is created unverified -----------------------------------
 async def test_oauth_creates_unverified_new_email(sessionmaker, UserModel) -> None:
     repo = UserRepository(UserModel)
@@ -86,7 +86,7 @@ async def test_oauth_creates_unverified_new_email(sessionmaker, UserModel) -> No
         assert repo.email_verified(user) is False  # not treated as proven
 
 
-# --- #7: username generation is bounded and survives an insert race ----------
+# --- username generation is bounded and survives an insert race ----------
 async def test_unique_username_falls_back_to_random(sessionmaker, UserModel) -> None:
     class AllTakenRepo(UserRepository):
         async def username_exists(self, db, username):  # type: ignore[override]
@@ -123,3 +123,12 @@ async def test_create_user_retries_on_integrity_error(sessionmaker, UserModel) -
     assert created is True
     assert repo.create_calls == 2  # first raced, retried with a random username
     assert repo.user_id(user) is not None
+
+
+def test_google_authorize_url_has_no_forced_offline_consent() -> None:
+    # crudauth never uses a refresh token, so Google's authorize URL must not
+    # force access_type=offline / prompt=consent (would re-prompt every login).
+    prov = GoogleOAuthProvider("id", "sec", "https://app/cb")
+    url = prov.get_authorization_url()["url"]
+    assert "access_type" not in url
+    assert "prompt=consent" not in url

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import AsyncIterator
 
+import fakeredis.aioredis
 import httpx
 import pytest
 from fastapi import Depends, FastAPI
@@ -15,13 +18,13 @@ from crudauth.ratelimit import (
     MemoryRateLimiterBackend,
     RateLimit,
     RedisBackend,
+    redis_rate_limiter,
 )
 from crudauth.ratelimit.base import RateLimiterBackend
+from crudauth.ratelimit.constants import LOCKOUT_NAMESPACE, MEMORY_SWEEP_EVERY_INCREMENTS
 
 
 def _fakeredis_client():
-    import fakeredis.aioredis
-
     return fakeredis.aioredis.FakeRedis()
 
 
@@ -59,16 +62,12 @@ async def test_ping(backend) -> None:
 
 
 async def test_memory_backend_evicts_abandoned_window_keys() -> None:
-    # #1: rolling window-stamped keys are never re-touched; the periodic sweep
+    # rolling window-stamped keys are never re-touched; the periodic sweep
     # must evict them so a high-cardinality keyspace can't grow unbounded.
-    import time as _time
-
-    from crudauth.ratelimit.constants import MEMORY_SWEEP_EVERY_INCREMENTS
-
     b = MemoryRateLimiterBackend()
     for i in range(300):  # simulate abandoned, already-expired window keys
         b._counts[f"old:{i}"] = 1
-        b._deadline[f"old:{i}"] = _time.monotonic() - 1
+        b._deadline[f"old:{i}"] = time.monotonic() - 1
     for _ in range(MEMORY_SWEEP_EVERY_INCREMENTS):  # drive the periodic sweep
         await b.increment("live", 1, 100)
     assert not any(k.startswith("old:") for k in b._counts)  # stale keys gone
@@ -135,7 +134,7 @@ async def test_rate_limit_dependency_raises_429(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -163,7 +162,7 @@ async def test_rate_limit_keyed_by_user(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -203,7 +202,7 @@ async def test_rate_limit_keyed_by_custom_callable(get_session, UserModel) -> No
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -231,7 +230,7 @@ async def test_rate_limit_disabled_with_times_zero(get_session, UserModel) -> No
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -247,3 +246,144 @@ async def test_rate_limit_disabled_with_times_zero(get_session, UserModel) -> No
         for _ in range(10):
             assert (await c.get("/free")).status_code == 200
     await auth.shutdown()
+
+
+# --- memory-backend startup warning -----------------------------------------
+def test_warns_on_memory_backend_by_default(get_session, UserModel, caplog) -> None:
+    with caplog.at_level(logging.WARNING, logger="crudauth"):
+        CRUDAuth(
+            session=get_session,
+            user_model=UserModel,
+            SECRET_KEY="test-secret-key-0123456789-0123456789",
+            transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+        )
+    assert "in-memory backend" in caplog.text
+
+
+def test_memory_warning_silenced_by_flag(get_session, UserModel, caplog) -> None:
+    with caplog.at_level(logging.WARNING, logger="crudauth"):
+        CRUDAuth(
+            session=get_session,
+            user_model=UserModel,
+            SECRET_KEY="test-secret-key-0123456789-0123456789",
+            transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+            warn_on_memory_backend=False,
+        )
+    assert "in-memory backend" not in caplog.text
+
+
+def test_no_memory_warning_with_redis_backends(get_session, UserModel, caplog) -> None:
+    limiter = redis_rate_limiter(client=fakeredis.aioredis.FakeRedis())
+    with caplog.at_level(logging.WARNING, logger="crudauth"):
+        CRUDAuth(
+            session=get_session,
+            user_model=UserModel,
+            SECRET_KEY="test-secret-key-0123456789-0123456789",
+            transports=[
+                SessionTransport(
+                    backend="redis",
+                    redis_url="redis://localhost",
+                    cookies=CookieConfig(secure=False),
+                )
+            ],
+            rate_limiter=limiter,
+        )
+    assert "in-memory backend" not in caplog.text
+
+
+# --- KeyBy.USER shares authentication with the endpoint's current_user --------
+async def test_user_keyed_rate_limit_shares_authentication(
+    get_session, UserModel, monkeypatch
+) -> None:
+    # an endpoint with current_user() AND a KeyBy.USER rate limit must resolve the
+    # principal once per request (shared via request.state), not once per dependency.
+    auth = CRUDAuth(
+        session=get_session,
+        user_model=UserModel,
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
+        transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+    )
+    calls = {"n": 0}
+    real = auth.repo.get_by_id
+
+    async def counting(db, uid):
+        calls["n"] += 1
+        return await real(db, uid)
+
+    monkeypatch.setattr(auth.repo, "get_by_id", counting)
+
+    app = FastAPI()
+    app.include_router(auth.router)
+
+    @app.get(
+        "/shared",
+        dependencies=[Depends(auth.rate_limit("shared_limit", RateLimit(100, 60), key=KeyBy.USER))],
+    )
+    async def shared(user: Principal = Depends(auth.current_user())):
+        return {"id": user.user_id}
+
+    await auth.initialize()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        await c.post(
+            "/register", json={"email": "a@x.com", "username": "a", "password": "pw123456"}
+        )
+        await c.post("/login", data={"username": "a", "password": "pw123456"})
+        calls["n"] = 0
+        r = await c.get("/shared")
+        assert r.status_code == 200
+        assert calls["n"] == 1  # one shared auth, not one per dependency
+    await auth.shutdown()
+
+
+# --- #16: escalation memory survives a paced, sustained attack ----------------
+async def test_escalation_survives_paced_attack(monkeypatch) -> None:
+    # The rounds counter's TTL is re-armed on every lockout, so an attack paced
+    # to span > round_retention keeps climbing the backoff instead of resetting.
+    import crudauth.ratelimit.backends.memory as mem
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(mem.time, "monotonic", lambda: clock["t"])
+
+    b = MemoryRateLimiterBackend()
+    pol = LockoutPolicy(
+        b,
+        max_attempts=1,
+        attempt_window_seconds=100_000,  # attempt counters never expire during the test
+        lockout_base_seconds=10,
+        lockout_max_seconds=10_000,
+        round_retention_seconds=100,
+    )
+
+    async def attempt() -> int:
+        _, _, retry_after = await pol.check_and_record("1.1.1.1", "v", success=False)
+        return retry_after
+
+    assert await attempt() == 0  # under the cap
+    assert await attempt() == 10  # round 0 lockout (base)
+    clock["t"] += 55  # past the 10s lock, within the 100s rounds window
+    assert await attempt() == 20  # round 1 (escalated); re-arms rounds TTL
+    clock["t"] += 65  # now t=1120 > the ORIGINAL 1100 rounds expiry
+    # without the re-arm the rounds counter would have expired and reset to base
+    assert await attempt() == 40  # round 2 - escalation memory survived
+
+
+# --- #17: on_login_success governs the per-IP pressure valve ------------------
+async def test_clear_user_only_keeps_ip_pressure() -> None:
+    b = MemoryRateLimiterBackend()
+    pol = LockoutPolicy(b, max_attempts=3, on_login_success="clear_user_only")
+    for _ in range(3):
+        await pol.check_and_record("10.0.0.1", "attacker", success=False)
+    await pol.check_and_record("10.0.0.1", "neighbor", success=True)  # co-located success
+    assert await b.get_count(f"{LOCKOUT_NAMESPACE}:ip:10.0.0.1") is not None  # per-IP kept
+    assert await b.get_count(f"{LOCKOUT_NAMESPACE}:user:neighbor") is None  # username cleared
+
+
+async def test_clear_all_clears_ip_pressure() -> None:
+    b = MemoryRateLimiterBackend()
+    pol = LockoutPolicy(b, max_attempts=3, on_login_success="clear_all")  # default
+    for _ in range(3):
+        await pol.check_and_record("10.0.0.1", "attacker", success=False)
+    await pol.check_and_record("10.0.0.1", "neighbor", success=True)
+    assert await b.get_count(f"{LOCKOUT_NAMESPACE}:ip:10.0.0.1") is None  # per-IP cleared too

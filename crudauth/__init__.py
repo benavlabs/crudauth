@@ -24,6 +24,7 @@ from .exceptions import (
     ForbiddenException,
     NotFoundException,
     RateLimitException,
+    SudoLockoutError,
     UnauthorizedException,
     UnprocessableEntityException,
 )
@@ -31,6 +32,7 @@ from .crud_auth import CRUDAuth
 from .hooks import AuthHooks, HookContext
 from .oauth import OAuthCredentials
 from .principal import Principal
+from .sudo import SudoConfig
 from .transports import BearerTransport, SessionTransport
 
 __version__ = "0.1.0"
@@ -48,6 +50,7 @@ __all__ = [
     "Transport",
     "AuthContext",
     "CookieConfig",
+    "SudoConfig",
     # exceptions
     "BadRequestException",
     "NotFoundException",
@@ -56,5 +59,6 @@ __all__ = [
     "UnprocessableEntityException",
     "DuplicateValueException",
     "RateLimitException",
+    "SudoLockoutError",
     "CSRFException",
 ]

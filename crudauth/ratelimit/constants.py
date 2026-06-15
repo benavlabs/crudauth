@@ -7,11 +7,17 @@
 from __future__ import annotations
 
 # Login-lockout keys live under this namespace, e.g. ``login:ip:<ip>``. They are
-# TTL'd and must never be bulk-deleted by the session cleanup sweep (Convention 9).
+# TTL'd and must never be bulk-deleted by the session cleanup sweep, which would
+# clear an attacker's accumulated failures.
 LOCKOUT_NAMESPACE = "login"
 
 # Namespace for the per-endpoint ``rate_limit()`` dependency keys.
 RATE_LIMIT_NAMESPACE = "ratelimit"
+
+# Sudo-lockout keys live under this namespace (``sudo:fail:<uid>`` /
+# ``sudo:lock:<uid>``), kept separate from the ``login`` lockout so a sudo
+# brute force can't reset login counters or vice versa.
+SUDO_NAMESPACE = "sudo"
 
 # Default Redis key prefix for the redis backend.
 REDIS_KEY_PREFIX = "crudauth:rl:"

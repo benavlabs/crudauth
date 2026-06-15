@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 from urllib.parse import urlencode
 
-from .constants import PKCE_VERIFIER_BYTES, STATE_BYTES
+from .constants import OAUTH_HTTP_TIMEOUT_SECONDS, PKCE_VERIFIER_BYTES, STATE_BYTES
 from .schemas import OAuthUserInfo
 
 __all__ = ["AbstractOAuthProvider"]
@@ -36,7 +36,15 @@ class AbstractOAuthProvider(ABC):
     Subclass it, pass the three endpoints + scopes + ``provider_name`` to
     ``super().__init__``, implement [process_user_info][crudauth.oauth.provider.AbstractOAuthProvider.process_user_info], and register it
     with [OAuthProviderFactory][crudauth.oauth.factory.OAuthProviderFactory]. Set ``email_verified`` honestly -
-    account linking gates on it (Convention 10).
+    auto-linking to an existing account requires a verified provider email.
+
+    Note:
+        A custom provider named ``"gitlab"`` requires a ``gitlab_id`` column on
+        your user model (that's where its account id is stored and matched). Add
+        it to your model (or map it via ``column_map=``); [CRUDAuth][crudauth.crud_auth.CRUDAuth]
+        raises at startup if a configured provider has no ``{provider}_id``
+        column. Only ``google_id``/``github_id`` ship on
+        [AuthUserMixin][crudauth.models.mixin.AuthUserMixin].
 
     Example:
         ```python
@@ -58,6 +66,7 @@ class AbstractOAuthProvider(ABC):
                 )
 
         OAuthProviderFactory.register_provider("gitlab", GitLabOAuthProvider)
+        # ...and add `gitlab_id` to your user model.
         ```
     """
 
@@ -168,7 +177,7 @@ class AbstractOAuthProvider(ABC):
         req_headers = {"Accept": "application/json"}
         if headers:
             req_headers.update(headers)
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=OAUTH_HTTP_TIMEOUT_SECONDS) as client:
             resp = await client.post(self.token_endpoint, data=data, headers=req_headers)
             resp.raise_for_status()
             return resp.json()
@@ -187,7 +196,7 @@ class AbstractOAuthProvider(ABC):
             httpx.HTTPStatusError: If the userinfo endpoint returns an error status.
         """
         httpx = _require_httpx()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=OAUTH_HTTP_TIMEOUT_SECONDS) as client:
             resp = await client.get(
                 self.userinfo_endpoint,
                 headers={

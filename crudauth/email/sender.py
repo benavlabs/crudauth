@@ -3,28 +3,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Literal
+
+from .constants import EMAIL_KINDS, EmailKind
 
 __all__ = ["EmailSender", "EmailKind", "EMAIL_KINDS"]
-
-# The message kinds crudauth asks the adapter to deliver. existing_account is a
-# security notice ("someone tried to register with your email"), distinct from
-# the cheery welcome.
-EmailKind = Literal[
-    "verify_email",
-    "reset_password",
-    "change_email",
-    "welcome",
-    "existing_account",
-]
-
-EMAIL_KINDS: tuple[EmailKind, ...] = (
-    "verify_email",
-    "reset_password",
-    "change_email",
-    "welcome",
-    "existing_account",
-)
 
 
 class EmailSender(ABC):
@@ -53,5 +35,12 @@ class EmailSender(ABC):
             kind: Which message this is - one of :data:`EMAIL_KINDS`. Use it to
                 select the template (``existing_account`` is a security notice,
                 not a welcome).
+
+        Note:
+            Prefer to **enqueue** (hand off to a task queue) rather than block on
+            SMTP/provider I/O here. crudauth treats the registration sends as
+            best-effort (a failure is logged, not surfaced), but other flows may
+            propagate a raised send as a 5xx - a non-blocking adapter avoids both
+            slow requests and transient-failure errors.
         """
         raise NotImplementedError

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
+from sqlalchemy.exc import IntegrityError
+from starlette.requests import Request
 
 from crudauth import (
     AuthHooks,
@@ -26,12 +29,15 @@ from crudauth.oauth import (
 )
 from crudauth.ratelimit import LockoutPolicy, MemoryRateLimiterBackend
 from crudauth.repository import UserRepository
+from crudauth.storage import get_session_storage
+from crudauth.transports.bearer.tokens import create_signed_token
 from crudauth.transports.session import SessionManager
+from crudauth.transports.session.schemas import SessionData
 from crudauth.utils import get_password_hash
 
 
 # =============================================================================
-# #1 - user_id type contract: JWT 'sub' is a string; get_by_id must coerce to PK
+# user_id type contract: JWT 'sub' is a string; get_by_id must coerce to PK
 # =============================================================================
 async def test_get_by_id_coerces_string_sub_to_int_pk(sessionmaker, UserModel) -> None:
     repo = UserRepository(UserModel)
@@ -84,18 +90,18 @@ async def test_bearer_and_email_flow_use_consistent_id_type(sessionmaker, UserMo
 
 
 # =============================================================================
-# #2 - remember_me cookie lifetime tracks the server-side window
+# remember_me cookie lifetime tracks the server-side window
 # =============================================================================
 async def test_session_cookie_is_session_scoped_remember_me_is_persistent(
     get_session, UserModel
 ) -> None:
-    # #2 fix: a non-remember login emits a SESSION cookie (no Max-Age) so the
+    # a non-remember login emits a SESSION cookie (no Max-Age) so the
     # server-side sliding idle check is the real expiry; remember-me emits a
     # persistent cookie with a long Max-Age.
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[
             SessionTransport(
                 cookies=CookieConfig(secure=False), session_timeout_minutes=30, remember_me_days=30
@@ -133,7 +139,7 @@ def _cookie_max_age(response, name) -> int | None:
 
 
 # =============================================================================
-# #3 / #4 - OAuth: email required; unverified email is not auto-linked
+# OAuth: email required; unverified email is not auto-linked
 # =============================================================================
 class _Stub(AbstractOAuthProvider):
     def __init__(self, *a, info=None, **k):
@@ -206,7 +212,7 @@ async def test_oauth_verified_email_links(sessionmaker, UserModel) -> None:
 
 
 # =============================================================================
-# #5 - open redirect is neutralized
+# open redirect is neutralized
 # =============================================================================
 class StubRedirectProvider(AbstractOAuthProvider):
     def __init__(self, client_id, client_secret, redirect_uri, scopes=None):
@@ -236,11 +242,11 @@ class StubRedirectProvider(AbstractOAuthProvider):
 OAuthProviderFactory.register_provider("redir", StubRedirectProvider)
 
 
-async def test_open_redirect_blocked(get_session, UserModel) -> None:
+async def _run_oauth_redirect(get_session, UserModel, redirect_to):
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         oauth={"redir": OAuthCredentials(client_id="i", client_secret="s")},
         redirect_base_url="http://test",
@@ -251,22 +257,81 @@ async def test_open_redirect_blocked(get_session, UserModel) -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as c:
-        r = await c.get("/oauth/redir/authorize?redirect_to=https://evil.com")
+        r = await c.get("/oauth/redir/authorize", params={"redirect_to": redirect_to})
         state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
         r = await c.get(f"/oauth/redir/callback?code=abc&state={state}")
-        # must NOT redirect to the attacker host - falls back to the safe
-        # same-origin default (the configured redirect_base_url), never evil.com
-        assert "evil.com" not in r.headers["location"]
-        assert r.headers["location"] == "http://test"
+        location = r.headers["location"]
+    await auth.shutdown()
+    return location
+
+
+@pytest.mark.parametrize(
+    "evil",
+    [
+        "https://evil.com",
+        "//evil.com",
+        "/\\evil.com",  # backslash → browsers normalize to //evil.com
+        "/\\/evil.com",
+        "\\/evil.com",
+        "javascript:alert(1)",
+        "/\tevil",  # control char
+    ],
+)
+async def test_open_redirect_blocked(evil, get_session, UserModel) -> None:
+    # every hostile target falls back to the safe same-origin default
+    location = await _run_oauth_redirect(get_session, UserModel, evil)
+    assert "evil.com" not in location
+    assert location == "http://test"
+
+
+@pytest.mark.parametrize("ok", ["/dashboard", "/a/b?c=d", "/"])
+async def test_safe_relative_redirect_honored(ok, get_session, UserModel) -> None:
+    location = await _run_oauth_redirect(get_session, UserModel, ok)
+    assert location == ok
+
+
+# =============================================================================
+# /register survives a unique-collision race (no 500)
+# =============================================================================
+async def test_register_integrityerror_recovers_cleanly(
+    get_session, UserModel, monkeypatch
+) -> None:
+    # Force the lost-race branch deterministically: pre-check passes (no row),
+    # the insert raises IntegrityError → the route must recover to a clean
+    # duplicate response (DuplicateValueException → 422), not a 500.
+    # (A true concurrent test isn't viable here: the conftest's in-memory SQLite
+    # shares one connection via StaticPool, so two sessions corrupt each other's
+    # transaction rather than isolating - an artifact of the test DB, not the code.)
+    auth = CRUDAuth(
+        session=get_session,
+        user_model=UserModel,
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
+        transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+    )
+
+    async def boom(*args, **kwargs):
+        raise IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed"))
+
+    monkeypatch.setattr(auth.repo, "create", boom)
+
+    app = FastAPI()
+    app.include_router(auth.router)
+    await auth.initialize()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        r = await c.post(
+            "/register", json={"email": "a@x.com", "username": "a", "password": "pw123456"}
+        )
+        assert r.status_code != 500  # the race is recovered, not crashed
+        assert r.status_code == 422  # clean duplicate (DuplicateValueException)
     await auth.shutdown()
 
 
 # =============================================================================
-# #6 - cleanup sweep does NOT wipe login-lockout state
+# cleanup sweep does NOT wipe login-lockout state
 # =============================================================================
 async def test_cleanup_preserves_lockout() -> None:
-    from crudauth.storage import get_session_storage
-
     mgr = SessionManager(
         get_session_storage("memory", prefix="session:"),
         csrf_storage=get_session_storage("memory", prefix="csrf:"),
@@ -285,14 +350,9 @@ async def test_cleanup_preserves_lockout() -> None:
 
 
 # =============================================================================
-# #7 - CSRF token slides forward with session activity
+# CSRF token slides forward with session activity
 # =============================================================================
 async def test_csrf_renews_with_session_activity() -> None:
-    from starlette.requests import Request
-
-    from crudauth.storage import get_session_storage
-    from crudauth.transports.session.schemas import SessionData
-
     mgr = SessionManager(
         get_session_storage("memory", prefix="session:", expiration=1800),
         csrf_storage=get_session_storage("memory", prefix="csrf:", expiration=1800),
@@ -311,7 +371,7 @@ async def test_csrf_renews_with_session_activity() -> None:
 
 
 # =============================================================================
-# #8 - register is non-enumerating when email is configured; and is throttled
+# register is non-enumerating when email is configured; and is throttled
 # =============================================================================
 class _Capture(EmailSender):
     def __init__(self) -> None:
@@ -326,7 +386,7 @@ async def test_register_does_not_leak_existing_email(get_session, UserModel) -> 
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         email=EmailConfig(sender=sender, frontend_url="https://app.example.com"),
     )
@@ -345,7 +405,7 @@ async def test_register_does_not_leak_existing_email(get_session, UserModel) -> 
         )
     await auth.shutdown()
     # New-email and existing-email responses are byte-identical (status + body),
-    # so registration reveals nothing about which emails exist (Convention 12).
+    # so registration reveals nothing about which emails exist.
     assert r1.status_code == 202
     assert r2.status_code == 202
     assert r1.json() == r2.json()
@@ -357,7 +417,7 @@ async def test_register_throttled(get_session, UserModel) -> None:
     auth = CRUDAuth(
         session=get_session,
         user_model=UserModel,
-        SECRET_KEY="x",
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
     )
     app = FastAPI()
@@ -378,18 +438,15 @@ async def test_register_throttled(get_session, UserModel) -> None:
 
 
 # =============================================================================
-# #10 - confirm_email_change keeps the token if the target became taken
+# confirm_email_change keeps the token if the target became taken
 # =============================================================================
 async def test_email_change_token_survives_race(sessionmaker, UserModel) -> None:
-    from crudauth.storage import get_session_storage
-    from crudauth.transports.bearer.tokens import create_signed_token
-
     repo = UserRepository(UserModel)
     sender = _Capture()
     store = get_session_storage("memory", prefix="used:")
     svc = EmailFlowService(
         repo=repo,
-        secret_key="x",
+        secret_key="test-secret-key-0123456789-0123456789",
         config=EmailConfig(sender=sender, frontend_url="https://app"),
         hooks=AuthHooks(),
         token_store=store,
@@ -402,12 +459,15 @@ async def test_email_change_token_survives_race(sessionmaker, UserModel) -> None
         # someone else already owns the target email
         await repo.create(db, {"email": "taken@x.com", "username": "other", "hashed_password": "h"})
 
-    token = create_signed_token("x", uid, "change_email", extra_claims={"new_email": "taken@x.com"})
+    token = create_signed_token(
+        "test-secret-key-0123456789-0123456789",
+        uid,
+        "change_email",
+        extra_claims={"new_email": "taken@x.com"},
+    )
     async with sessionmaker() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.confirm_email_change(db, token)
         assert exc.value.status_code == 422  # duplicate, not "token used"
     # the token was NOT consumed (so a fresh attempt with a free email could work)
-    import hashlib
-
     assert not await store.exists(hashlib.sha256(token.encode()).hexdigest())

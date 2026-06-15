@@ -19,6 +19,17 @@ __all__ = ["GoogleOAuthProvider"]
 
 
 class GoogleOAuthProvider(AbstractOAuthProvider):
+    """Google OAuth provider.
+
+    Note:
+        Uses the base authorization URL as-is - it does NOT force
+        ``access_type=offline`` / ``prompt=consent``. crudauth reads userinfo once
+        and never uses a refresh token, so requesting offline access (and
+        re-prompting for consent on every login) would be pointless friction.
+        Pass ``extra_params`` to ``get_authorization_url`` if you genuinely need
+        offline access.
+    """
+
     def __init__(
         self,
         client_id: str,
@@ -36,12 +47,6 @@ class GoogleOAuthProvider(AbstractOAuthProvider):
             userinfo_endpoint=GOOGLE_USERINFO_ENDPOINT,
             provider_name=GOOGLE,
         )
-
-    def get_authorization_url(self, state=None, pkce=True, extra_params=None):
-        extra = {"access_type": "offline", "prompt": "consent"}
-        if extra_params:
-            extra.update(extra_params)
-        return super().get_authorization_url(state=state, pkce=pkce, extra_params=extra)
 
     async def process_user_info(self, user_info: dict[str, Any]) -> OAuthUserInfo:
         """Normalize Google's userinfo payload.

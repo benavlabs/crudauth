@@ -51,7 +51,7 @@ def build_email_router(*, auth: Any, service: EmailFlowService) -> APIRouter:
     user_dep = auth.current_user()
 
     @router.post(
-        "/verify-email/request",
+        "/email/verify-request",
         dependencies=[Depends(auth.rate_limit("email_verify_request", key=KeyBy.IP))],
     )
     async def request_verification(body: _EmailIn, db: Annotated[Any, Depends(db_dep)]):
@@ -59,14 +59,14 @@ def build_email_router(*, auth: Any, service: EmailFlowService) -> APIRouter:
         await service.request_email_verification(db, body.email)
         return {"detail": "If an account exists, a verification email has been sent."}
 
-    @router.post("/verify-email/confirm")
+    @router.post("/email/verify-confirm")
     async def confirm_verification(body: _TokenIn, db: Annotated[Any, Depends(db_dep)]):
         """Confirm a verification token and mark the email verified."""
         await service.confirm_email_verification(db, body.token)
         return {"detail": "Email verified successfully."}
 
     @router.post(
-        "/password/request-reset",
+        "/password/reset-request",
         dependencies=[Depends(auth.rate_limit("password_reset_request", key=KeyBy.IP))],
     )
     async def request_reset(body: _EmailIn, db: Annotated[Any, Depends(db_dep)]):
@@ -74,7 +74,7 @@ def build_email_router(*, auth: Any, service: EmailFlowService) -> APIRouter:
         await service.request_password_reset(db, body.email)
         return {"detail": "If an account exists, a password reset email has been sent."}
 
-    @router.post("/password/reset")
+    @router.post("/password/reset-confirm")
     async def reset(body: _ResetIn, db: Annotated[Any, Depends(db_dep)]):
         """Reset the password from a valid token and evict the user's other sessions."""
         await service.reset_password(db, body.token, body.new_password)

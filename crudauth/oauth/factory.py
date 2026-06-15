@@ -58,7 +58,11 @@ class OAuthProviderFactory:
             A configured [AbstractOAuthProvider][crudauth.oauth.provider.AbstractOAuthProvider].
 
         Raises:
-            ValueError: If ``provider_name`` isn't registered.
+            ValueError: If ``provider_name`` isn't registered. This is a
+                config-time error (raised while building the app), distinct from
+                the request-time ``BadRequestException`` the OAuth router raises
+                for an unknown provider in a URL - different layers, deliberately
+                different error types.
         """
         provider_class = cls._providers.get(provider_name)
         if provider_class is None:

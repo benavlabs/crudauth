@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -25,8 +26,10 @@ from .config import EmailConfig
 from .constants import (
     CHANGE,
     CHANGE_ACTION,
+    EXISTING_ACCOUNT_ACTION,
     RESET,
     RESET_ACTION,
+    EmailKind,
     SUBJECT_CHANGE,
     SUBJECT_EXISTING_ACCOUNT,
     SUBJECT_RESET,
@@ -40,6 +43,8 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..transports.session.manager import SessionManager
 
 __all__ = ["EmailFlowService"]
+
+logger = logging.getLogger("crudauth")
 
 
 class _UsedToken(BaseModel):
@@ -81,14 +86,16 @@ class EmailFlowService:
 
     # --- one-time-use guard --------------------------------------------------
     async def _consume(self, token: str, ttl_seconds: int) -> bool:
-        """Mark a token consumed. Returns ``True`` on first use, ``False`` on replay."""
+        """Mark a token consumed. Returns ``True`` on first use, ``False`` on replay.
+
+        Uses the storage layer's atomic ``set_if_absent`` so two concurrent
+        redemptions of the same token can't both win the race - which, for a
+        password reset, could otherwise apply two different new passwords.
+        """
         if self.token_store is None:
             return True
         key = hashlib.sha256(token.encode()).hexdigest()
-        if await self.token_store.exists(key):
-            return False
-        await self.token_store.create(_UsedToken(), session_id=key, expiration=ttl_seconds)
-        return True
+        return await self.token_store.set_if_absent(key, _UsedToken(), expiration=ttl_seconds)
 
     async def _email_within_limit(self, action: str, email: str) -> bool:
         """Per-target-email throttle. Returns ``True`` if a send is allowed.
@@ -108,6 +115,21 @@ class EmailFlowService:
         )
         return not limited
 
+    async def _send_best_effort(self, *, to: str, subject: str, body: str, kind: EmailKind) -> None:
+        """Deliver a trigger email without letting a send failure fail the request.
+
+        These request endpoints only reach the send when the user/address exists,
+        so a propagated send error (blocking adapter + provider down) would 500
+        for existing addresses while absent ones return the uniform success - an
+        existence oracle. Swallow + log instead, preserving non-enumeration.
+        (Senders should enqueue rather than block; this is the safety net when
+        they don't.)
+        """
+        try:
+            await self.config.sender.send(to=to, subject=subject, body=body, kind=kind)
+        except Exception:
+            logger.warning("crudauth: %s email failed to send", kind, exc_info=True)
+
     async def notify_existing_account(self, email: str) -> None:
         """Tell an existing owner someone tried to register with their email.
 
@@ -119,7 +141,15 @@ class EmailFlowService:
             Uses ``kind="existing_account"`` - a security notice, distinct from
             the ``welcome`` template, so the adapter doesn't render a cheery
             greeting to someone who already has an account.
+
+        Note:
+            Subject to the same silent per-target throttle as the other flows, so
+            a register-spray (the per-IP limit is spoofable) can't email-bomb a
+            victim's address. A throttled send is a silent no-op - the route
+            still returns its uniform response, preserving non-enumeration.
         """
+        if not await self._email_within_limit(EXISTING_ACCOUNT_ACTION, email):
+            return
         await self.config.sender.send(
             to=email,
             subject=SUBJECT_EXISTING_ACCOUNT,
@@ -145,7 +175,7 @@ class EmailFlowService:
             expires_hours=self.config.verify_ttl_hours,
             algorithm=self.algorithm,
         )
-        await self.config.sender.send(
+        await self._send_best_effort(
             to=email,
             subject=SUBJECT_VERIFY,
             body=f"Verify your email: {self.config.link(self.config.verify_path, token)}",
@@ -195,7 +225,7 @@ class EmailFlowService:
             expires_hours=self.config.reset_ttl_hours,
             algorithm=self.algorithm,
         )
-        await self.config.sender.send(
+        await self._send_best_effort(
             to=email,
             subject=SUBJECT_RESET,
             body=f"Reset your password: {self.config.link(self.config.reset_path, token)}",
@@ -203,7 +233,7 @@ class EmailFlowService:
         )
 
     async def reset_password(self, db: AsyncSession, token: str, new_password: str) -> Any:
-        """Reset the password and evict the user's other sessions.
+        """Reset the password and evict every outstanding credential.
 
         Args:
             db: Active async session.
@@ -217,9 +247,13 @@ class EmailFlowService:
             BadRequestException: If the token is invalid, expired, or already used.
 
         Note:
-            Terminating the user's other sessions is attacker-eviction: a reset
-            often follows a compromise, so any session an attacker holds dies
-            with it.
+            A reset is attacker-eviction: it often follows a compromise, so any
+            credential an attacker holds must die with it. Server-side sessions
+            are terminated, and the user's ``token_version`` is bumped - which
+            invalidates all outstanding bearer access and refresh tokens (their
+            ``ver`` claim is now stale). Bearer eviction needs a ``token_version``
+            column; without it (a custom model that omits it) only sessions are
+            evicted.
         """
         sub = verify_signed_token(token, self.secret_key, RESET, algorithm=self.algorithm)
         if sub is None:
@@ -230,6 +264,7 @@ class EmailFlowService:
         if user is None:
             raise BadRequestException("Invalid or expired token")
         await self.repo.update(db, user, {"hashed_password": get_password_hash(new_password)})
+        await self.repo.increment_token_version(db, user)
         if self.session_manager is not None:
             await self.session_manager.terminate_all_user_sessions(
                 self.repo.user_id(user), reason="password_reset"
@@ -272,7 +307,7 @@ class EmailFlowService:
                 algorithm=self.algorithm,
                 extra_claims={"new_email": new_email_c},
             )
-            await self.config.sender.send(
+            await self._send_best_effort(
                 to=new_email_c,
                 subject=SUBJECT_CHANGE,
                 body=f"Confirm your new email: {self.config.link(self.config.change_path, token)}",
@@ -281,6 +316,12 @@ class EmailFlowService:
 
     async def confirm_email_change(self, db: AsyncSession, token: str) -> Any:
         """Apply a confirmed email change.
+
+        Note:
+            The confirmation link is delivered to, and clicked from, the new
+            address, so completing this flow proves control of it - the new email
+            is therefore marked verified (``email_verified=True``) alongside the
+            address update.
 
         Note:
             Availability is re-checked before consuming the token so a token
@@ -303,7 +344,7 @@ class EmailFlowService:
         if not await self._consume(token, self.config.change_ttl_hours * SECONDS_PER_HOUR):
             raise BadRequestException("Token already used")
         try:
-            await self.repo.update(db, user, {"email": new_email})
+            await self.repo.update(db, user, {"email": new_email, "email_verified": True})
         except IntegrityError as exc:
             await db.rollback()
             raise DuplicateValueException("Email already in use") from exc

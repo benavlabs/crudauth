@@ -66,6 +66,9 @@ class AuthRuntime:
         cookie_config: App-wide cookie policy.
         rate_limiter: Pluggable rate-limiter backend.
         lockout: Shared escalating login-lockout policy.
+        trusted_proxy_hops: Number of trusted reverse proxies in front of the
+            app, used to resolve the client IP from ``X-Forwarded-For``. ``0``
+            (default) ignores the header and uses the socket peer.
 
     Note:
         ``lockout`` is a single shared policy used by BOTH the session ``/login``
@@ -83,6 +86,7 @@ class AuthRuntime:
     cookie_config: CookieConfig = field(default_factory=CookieConfig)
     rate_limiter: "RateLimiterBackend | None" = None
     lockout: "LockoutPolicy | None" = None
+    trusted_proxy_hops: int = 0
 
 
 @dataclass

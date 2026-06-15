@@ -1,10 +1,11 @@
 """The session transport: cookie auth with CSRF, lockout, and device management.
 
 This is the default transport - configuring nothing gives you cookie sessions,
-CSRF double-submit, login lockout, secure cookies, and ``/login`` ``/logout``.
+CSRF synchronizer-token, login lockout, secure cookies, and ``/login`` ``/logout``.
 """
 
-from typing import Annotated, Any
+import logging
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
@@ -26,7 +27,12 @@ from ...hooks import HookContext
 from ...principal import Principal
 from ...storage import get_session_storage
 from ...storage.constants import BACKEND_MEMORY
-from ...utils import get_client_ip, verify_password
+from ...utils import (
+    canonical_identifier,
+    dummy_verify_password,
+    get_client_ip,
+    verify_password,
+)
 from .constants import (
     CSRF_HEADER_NAME,
     CSRF_STORAGE_PREFIX,
@@ -39,11 +45,13 @@ from .schemas import SessionData
 
 __all__ = ["SessionTransport"]
 
+logger = logging.getLogger("crudauth.session")
+
 
 class SessionTransport(Transport):
     """Cookie-based session auth - the default transport.
 
-    Configuring nothing gives cookie sessions, CSRF double-submit (header-only),
+    Configuring nothing gives cookie sessions, CSRF synchronizer-token (header-only),
     login lockout, secure cookies, and ``/login`` ``/logout``. CSRF is enforced
     inside [authenticate][crudauth.core.Transport.authenticate] on unsafe methods; the session cookie is never
     ``SameSite=None`` (rejected at construction).
@@ -51,9 +59,14 @@ class SessionTransport(Transport):
     Args:
         backend: ``"memory"`` (default) or ``"redis"`` for shared/persistent state.
         redis_url: Connection URL when ``backend="redis"``.
-        csrf: Enforce the double-submit header on unsafe methods (default ``True``).
+        csrf: Enforce the synchronizer-token header on unsafe methods (default ``True``).
         cookies: Per-transport [CookieConfig][crudauth.core.CookieConfig] override.
         login_max_attempts: Failed logins before the escalating lockout trips.
+        on_login_success: What a successful login clears - ``"clear_all"`` (default)
+            or ``"clear_user_only"`` (keeps per-IP pressure; only safe when the
+            per-IP key identifies an individual client, not a shared NAT/CGNAT
+            egress). Governs the shared lockout (both ``/login`` and ``/token``).
+            See [LockoutPolicy][crudauth.ratelimit.policy.LockoutPolicy].
 
     Example:
         ```python
@@ -81,6 +94,7 @@ class SessionTransport(Transport):
         login_attempt_window_seconds: int = DEFAULT_LOGIN_ATTEMPT_WINDOW_SECONDS,
         login_lockout_base_seconds: int = DEFAULT_LOGIN_LOCKOUT_BASE_SECONDS,
         login_lockout_max_seconds: int = DEFAULT_LOGIN_LOCKOUT_MAX_SECONDS,
+        on_login_success: Literal["clear_all", "clear_user_only"] = "clear_all",
     ):
         self.backend = backend
         self.redis_url = redis_url
@@ -94,6 +108,7 @@ class SessionTransport(Transport):
         self.login_attempt_window_seconds = login_attempt_window_seconds
         self.login_lockout_base_seconds = login_lockout_base_seconds
         self.login_lockout_max_seconds = login_lockout_max_seconds
+        self.on_login_success = on_login_success
         self.manager: SessionManager | None = None
 
     # --- wiring --------------------------------------------------------------
@@ -146,6 +161,7 @@ class SessionTransport(Transport):
             cookie_secure=cookies.secure,
             cookie_samesite=cookies.samesite,
             cookie_path=cookies.path,
+            trusted_proxy_hops=runtime.trusted_proxy_hops,
         )
 
     async def initialize(self) -> None:
@@ -172,7 +188,6 @@ class SessionTransport(Transport):
         if not session_id:
             return None
 
-        await self.manager.cleanup_expired_sessions()
         session = await self.manager.validate_session(session_id)
         if session is None:
             return None
@@ -191,12 +206,12 @@ class SessionTransport(Transport):
         )
 
     async def _enforce_csrf(self, request: Request, session_id: str) -> None:
-        """Require a valid double-submit header on unsafe methods.
+        """Require a valid synchronizer-token header on unsafe methods.
 
         Note:
             Header-only by design: the ``csrf_token`` cookie auto-rides
             cross-origin requests but a custom header does not, so requiring the
-            header (not just the cookie) is what makes the double-submit check
+            header (not just the cookie) is what makes the synchronizer-token check
             load-bearing. Safe methods (GET/HEAD/OPTIONS) are exempt.
         """
         if not self.csrf_enabled or request.method in SAFE_METHODS:
@@ -226,11 +241,18 @@ class SessionTransport(Transport):
 
             Subject to login lockout (shared with bearer ``/token``). ``remember_me``
             switches the cookie from session-scoped to a long persistent lifetime.
+
+            Note:
+                A disabled account returns the same "Incorrect username or
+                password" as bad credentials, so a credential holder can't tell a
+                disabled account from a wrong password; the real reason is logged
+                server-side (``reason=disabled``) for operators.
             """
             assert self.manager is not None
-            ip = get_client_ip(request)
+            ip = get_client_ip(request, runtime.trusted_proxy_hops)
+            login_id = canonical_identifier(form_data.username)
             allowed, _, retry_after = await self.manager.track_login_attempt(
-                ip, form_data.username, success=False
+                ip, login_id, success=False
             )
             if not allowed:
                 raise RateLimitException(
@@ -238,14 +260,20 @@ class SessionTransport(Transport):
                 )
 
             user = await runtime.repo.get_by_identifier(db, form_data.username)
-            if user is None or not verify_password(
+            if user is None:
+                dummy_verify_password(form_data.password)
+                raise UnauthorizedException("Incorrect username or password")
+            if not verify_password(
                 form_data.password, runtime.repo.get(user, "hashed_password", "")
             ):
                 raise UnauthorizedException("Incorrect username or password")
             if not runtime.repo.is_active(user):
-                raise UnauthorizedException("Account is disabled")
+                logger.warning(
+                    "login denied: account disabled (user_id=%s)", runtime.repo.user_id(user)
+                )
+                raise UnauthorizedException("Incorrect username or password")
 
-            await self.manager.track_login_attempt(ip, form_data.username, success=True)
+            await self.manager.track_login_attempt(ip, login_id, success=True)
 
             metadata = {REMEMBER_ME_META_KEY: True} if remember_me else {}
             session_id, csrf = await self.manager.create_session(

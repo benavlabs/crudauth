@@ -16,9 +16,18 @@ class Base(DeclarativeBase):
 
 
 class User(Base, AuthUserMixin):
+    """Test user model with two app-defined columns outside crudauth's logical
+    contract: ``full_name`` (opt-in extra) and ``role`` (privileged, used to
+    exercise registration mass-assignment gating)."""
+
     __tablename__ = "users"
 
     full_name: Mapped[str | None] = mapped_column(default=None)
+    role: Mapped[str] = mapped_column(default="user")
+    # Per-provider id columns for the custom OAuth providers exercised in tests
+    # (built-ins google_id/github_id come from AuthUserMixin).
+    stub_id: Mapped[str | None] = mapped_column(default=None)
+    redir_id: Mapped[str | None] = mapped_column(default=None)
 
 
 @pytest_asyncio.fixture

@@ -8,6 +8,7 @@ per-username failure counters with exponential backoff and round retention.
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from ..constants import (
     DEFAULT_LOGIN_ATTEMPT_WINDOW_SECONDS,
@@ -43,7 +44,22 @@ class LockoutPolicy:
         lockout_base_seconds: First lockout duration; doubles each round.
         lockout_max_seconds: Cap on the exponential lockout duration.
         round_retention_seconds: How long a round counter persists, so repeat
-            offenders resume escalating rather than resetting.
+            offenders resume escalating rather than resetting. The TTL is slid
+            forward on every lockout (sliding window), so a slow, paced attack
+            keeps climbing the escalation ladder instead of forgetting it.
+        on_login_success: What a successful login clears.
+            ``"clear_all"`` (default) clears both the per-username and per-IP
+            failure pressure - friendly to legitimate users behind a shared
+            egress (corporate NAT / mobile CGNAT), at the cost of letting a
+            co-located attacker's per-IP budget be refreshed by an unrelated
+            user's success. ``"clear_user_only"`` clears just the username
+            dimension, keeping per-IP pressure - tighter against a single-source
+            brute force, but only safe when your per-IP key reliably identifies
+            an individual client (you terminate behind a proxy with
+            ``trusted_proxy_hops`` set AND your users aren't predominantly behind
+            shared egress); otherwise it can lock out innocent co-located users.
+            The lockout's primary key is ``ip + username`` together; this governs
+            only the secondary per-IP pressure valve on success.
         fail_open: On a backend error, allow (``True``) or block (``False``).
     """
 
@@ -56,6 +72,7 @@ class LockoutPolicy:
         lockout_base_seconds: int = DEFAULT_LOGIN_LOCKOUT_BASE_SECONDS,
         lockout_max_seconds: int = DEFAULT_LOGIN_LOCKOUT_MAX_SECONDS,
         round_retention_seconds: int = DEFAULT_LOGIN_ROUND_RETENTION_SECONDS,
+        on_login_success: Literal["clear_all", "clear_user_only"] = "clear_all",
         fail_open: bool = False,
     ):
         self.backend = backend
@@ -64,6 +81,7 @@ class LockoutPolicy:
         self.lockout_base = lockout_base_seconds
         self.lockout_max = lockout_max_seconds
         self.round_retention = round_retention_seconds
+        self.on_login_success = on_login_success
         self.fail_open = fail_open
 
     async def check_and_record(
@@ -96,14 +114,10 @@ class LockoutPolicy:
 
         try:
             if success:
-                for key in (
-                    ip_attempts,
-                    user_attempts,
-                    ip_lock,
-                    user_lock,
-                    ip_rounds,
-                    user_rounds,
-                ):
+                cleared = [user_attempts, user_lock, user_rounds]
+                if self.on_login_success == "clear_all":
+                    cleared += [ip_attempts, ip_lock, ip_rounds]
+                for key in cleared:
                     await b.delete(key)
                 return True, None, 0
 
@@ -123,8 +137,8 @@ class LockoutPolicy:
             round_ttl = max(retry_after, self.round_retention)
             await b.increment(ip_lock, 1, retry_after)
             await b.increment(user_lock, 1, retry_after)
-            await b.increment(ip_rounds, 1, round_ttl)
-            await b.increment(user_rounds, 1, round_ttl)
+            await b.increment_and_refresh_ttl(ip_rounds, 1, round_ttl)
+            await b.increment_and_refresh_ttl(user_rounds, 1, round_ttl)
             return False, 0, retry_after
         except Exception as exc:
             logger.warning("lockout backend error (fail_open=%s): %s", self.fail_open, exc)

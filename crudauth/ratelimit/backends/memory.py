@@ -52,6 +52,17 @@ class MemoryRateLimiterBackend(RateLimiterBackend):
         self._maybe_sweep()
         return self._counts[key]
 
+    async def increment_and_refresh_ttl(
+        self, key: str, amount: int = 1, expiry: int | None = None
+    ) -> int:
+        """Increment and slide the TTL forward on every call (see the base method)."""
+        self._gc(key)
+        self._counts[key] = self._counts.get(key, 0) + amount
+        if expiry is not None:
+            self._deadline[key] = time.monotonic() + expiry
+        self._maybe_sweep()
+        return self._counts[key]
+
     async def get_count(self, key: str) -> int | None:
         self._gc(key)
         return self._counts.get(key)

@@ -56,6 +56,19 @@ class RedisBackend(RateLimiterBackend):
             await self.client.expire(k, expiry)
         return value
 
+    async def increment_and_refresh_ttl(
+        self, key: str, amount: int = 1, expiry: int | None = None
+    ) -> int:
+        """Increment and re-arm the TTL atomically (``INCRBY`` + ``EXPIRE`` in one
+        pipeline), so a concurrent attempt can't interleave between them."""
+        k = self._k(key)
+        async with self.client.pipeline(transaction=True) as pipe:
+            pipe.incrby(k, amount)
+            if expiry is not None:
+                pipe.expire(k, expiry)
+            results = await pipe.execute()
+        return int(results[0])
+
     async def get_count(self, key: str) -> int | None:
         raw = await self.client.get(self._k(key))
         return int(raw) if raw is not None else None
@@ -76,6 +89,16 @@ class RedisBackend(RateLimiterBackend):
     async def increment_and_check(
         self, key: str, limit: int, period: int, *, fail_open: bool = True
     ) -> tuple[int, bool, int]:
+        """Fixed-window check over a window-stamped key.
+
+        Note:
+            Unlike the general ``increment`` (TTL armed first-touch only), this
+            re-arms ``expire`` on every call - safe and intentional here because
+            the key embeds ``window_start``, so each window is a fresh key that
+            only ever lives one window. Re-arming can't extend a previous
+            window's count; it just keeps the current window's key alive for its
+            own duration.
+        """
         now = int(time.time())
         window_start = now - (now % period)
         wkey = self._k(f"{key}:{window_start}")

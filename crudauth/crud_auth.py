@@ -15,22 +15,28 @@ import logging
 from typing import TYPE_CHECKING, Annotated, Any, Callable, Sequence
 
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from ._register import build_register_route
+from .register import build_register_route
 from .constants import (
     DEFAULT_ALGORITHM,
     DEFAULT_LOGIN_ATTEMPT_WINDOW_SECONDS,
     DEFAULT_LOGIN_LOCKOUT_BASE_SECONDS,
     DEFAULT_LOGIN_LOCKOUT_MAX_SECONDS,
     DEFAULT_LOGIN_MAX_ATTEMPTS,
+    MIN_PASSWORD_LENGTH,
     OAUTH_STATE_TTL_SECONDS,
     USED_TOKEN_TTL_SECONDS,
 )
 from .core import AuthContext, AuthRuntime, CookieConfig, Transport
 from .email.router import build_email_router
 from .email.service import EmailFlowService
-from .exceptions import ForbiddenException, RateLimitException, UnauthorizedException
+from .exceptions import (
+    BadRequestException,
+    ForbiddenException,
+    RateLimitException,
+    UnauthorizedException,
+)
 from .hooks import AuthHooks
 from .oauth import OAuthAccountService, OAuthProviderFactory
 from .oauth.router import build_oauth_router
@@ -45,9 +51,11 @@ from .ratelimit import (
 from .ratelimit.constants import RATE_LIMIT_NAMESPACE
 from .repository import REGISTRATION_ALLOWED_FIELDS, UserRepository
 from .storage import get_session_storage
+from .sudo import SudoConfig, SudoManager
+from .storage.constants import BACKEND_MEMORY
 from .transports.bearer.transport import BearerTransport
 from .transports.session.transport import SessionTransport
-from .utils import get_client_ip
+from .utils import get_client_ip, get_password_hash, is_unusable_password
 
 if TYPE_CHECKING:  # pragma: no cover
     from .ratelimit import RateLimiterBackend
@@ -56,6 +64,10 @@ if TYPE_CHECKING:  # pragma: no cover
 logger = logging.getLogger("crudauth")
 
 __all__ = ["CRUDAuth"]
+
+
+class _SetPasswordIn(BaseModel):
+    new_password: Annotated[str, Field(min_length=MIN_PASSWORD_LENGTH)]
 
 
 class CRUDAuth:
@@ -92,8 +104,12 @@ class CRUDAuth:
         algorithm: str = DEFAULT_ALGORITHM,
         cookies: CookieConfig | None = None,
         register_schema: type[BaseModel] | None = None,
+        register_extra_fields: set[str] | None = None,
         rate_limiter: "RateLimiterBackend | None" = None,
         rate_limits: dict[str, RateLimit] | None = None,
+        trusted_proxy_hops: int = 0,
+        sudo: SudoConfig | None = None,
+        warn_on_memory_backend: bool = True,
     ):
         """Configure the auth surface.
 
@@ -118,25 +134,50 @@ class CRUDAuth:
             algorithm: JWT signing algorithm (default ``"HS256"``).
             cookies: App-wide [CookieConfig][crudauth.core.CookieConfig] (``secure`` /
                 ``samesite`` / ``path``); transports may override per-instance.
-            register_schema: Custom Pydantic body for ``/register``; extra
-                non-privileged columns are persisted, privileged ones dropped.
+            register_schema: Custom Pydantic body for ``/register``. By default
+                only ``email``/``username`` are persisted; any other field is
+                dropped unless its name is listed in ``register_extra_fields``.
+            register_extra_fields: App-defined model columns that ``/register``
+                is allowed to set (e.g. ``{"full_name", "locale"}``). Registration
+                is an allowlist: without opting a column in here it is dropped,
+                so adding a column to your model never silently becomes settable
+                at signup. crudauth's privileged fields (``is_superuser``,
+                ``email_verified``, ...) can never be opted in.
             rate_limiter: Backend for lockout/throttles; defaults to an in-process
                 [MemoryRateLimiterBackend][crudauth.ratelimit.backends.memory.MemoryRateLimiterBackend]. Use
                 ``redis_rate_limiter(...)`` in production.
             rate_limits: Per-action overrides merged over
                 :data:`~crudauth.ratelimit.DEFAULT_RATE_LIMITS`.
+            trusted_proxy_hops: Number of trusted reverse proxies in front of the
+                app. ``0`` (default) ignores ``X-Forwarded-For`` and keys per-IP
+                rate limits / lockout on the socket peer; set to the count of
+                proxies you control (e.g. ``1`` behind a single nginx/Caddy) so
+                the real client IP is read without trusting attacker-supplied
+                header values. See [get_client_ip][crudauth.utils.get_client_ip].
+            sudo: Enable sudo mode (short-lived re-authentication for sensitive
+                actions) with this [SudoConfig][crudauth.sudo.SudoConfig]. Requires
+                a session transport - elevation is stamped on the server-side
+                session. Exposes ``auth.sudo`` and ``auth.require_sudo()``.
+            warn_on_memory_backend: Log a startup warning when an in-memory
+                backend is active (the zero-config default). In-memory state is
+                per-process, so under multiple workers it silently breaks; set
+                ``False`` to silence once you've accepted that (e.g. single-worker
+                dev).
 
         Raises:
-            ValueError: If ``SECRET_KEY`` is empty, or ``oauth`` is set without a
-                session transport / ``redirect_base_url``.
+            ValueError: If ``SECRET_KEY`` is empty; if ``oauth`` or ``sudo`` is
+                set without a session transport (and ``oauth`` also needs
+                ``redirect_base_url``); or if a configured OAuth provider has no
+                ``{provider}_id`` column on the user model.
         """
         if not SECRET_KEY:
             raise ValueError("SECRET_KEY is required")
         self.session = session
-        self.repo = UserRepository(user_model, column_map)
+        self.repo = UserRepository(user_model, column_map, register_extra_fields)
         self.hooks = hooks or AuthHooks()
         self.transports: list[Transport] = list(transports) if transports else [SessionTransport()]
         self._register_schema = register_schema
+        self._warn_on_register_extra_fields(register_extra_fields)
         self._warn_on_privileged_register_fields(register_schema)
         self._rate_limits: dict[str, RateLimit] = {**DEFAULT_RATE_LIMITS, **(rate_limits or {})}
 
@@ -149,6 +190,7 @@ class CRUDAuth:
             algorithm=algorithm,
             cookie_config=cookies or CookieConfig(),
             rate_limiter=rate_limiter or MemoryRateLimiterBackend(),
+            trusted_proxy_hops=trusted_proxy_hops,
         )
         self._session_transport = next(
             (t for t in self.transports if isinstance(t, SessionTransport)), None
@@ -156,6 +198,10 @@ class CRUDAuth:
         self.runtime.lockout = self._build_lockout(self._session_transport)
         for transport in self.transports:
             transport.bind(self.runtime)
+
+        self.sudo: SudoManager | None = None
+        if sudo is not None:
+            self._build_sudo(sudo)
 
         self._email_service: EmailFlowService | None = None
         self._email_token_store: AbstractSessionStorage[Any] | None = None
@@ -166,6 +212,9 @@ class CRUDAuth:
         self._oauth_state_storage: AbstractSessionStorage[Any] | None = None
         if oauth:
             self._build_oauth(oauth, redirect_base_url)
+
+        if warn_on_memory_backend:
+            self._warn_on_memory_backend()
 
     def _build_lockout(
         self, session_transport: "SessionTransport | None"
@@ -193,34 +242,88 @@ class CRUDAuth:
             lockout_max_seconds=(
                 st.login_lockout_max_seconds if st else DEFAULT_LOGIN_LOCKOUT_MAX_SECONDS
             ),
+            on_login_success=st.on_login_success if st else "clear_all",
             fail_open=False,
         )
 
-    def _warn_on_privileged_register_fields(self, schema: type[BaseModel] | None) -> None:
-        """Warn loudly when a custom register schema declares a gated field.
+    def _warn_on_register_extra_fields(self, extra: set[str] | None) -> None:
+        """Warn when ``register_extra_fields`` tries to opt in a privileged field.
 
-        The field is still dropped at runtime (silently, so a prober learns
-        nothing) - but a schema declaring ``is_superuser`` is a developer
-        misconfiguration worth surfacing at startup.
+        Those names stay gated regardless (the repo drops them), so this is a
+        no-op for safety - but it's a developer misconfiguration worth surfacing.
+        """
+        if not extra:
+            return
+        gated = self.repo.gated_register_fields(extra)
+        if gated:
+            logger.warning(
+                "register_extra_fields lists privileged field(s) %s; these stay gated "
+                "and will NOT be settable at registration. Remove them.",
+                sorted(gated),
+            )
+
+    def _warn_on_privileged_register_fields(self, schema: type[BaseModel] | None) -> None:
+        """Warn when a custom register schema declares fields registration drops.
+
+        Two cases, both surfaced at startup so a silent drop never bites:
+
+        - **Privileged** fields (``is_superuser``, ``email_verified``, ...) are
+          dropped unconditionally - declaring one is a security-relevant mistake.
+        - **Real model columns** that aren't opted in via ``register_extra_fields``
+          are also dropped; the developer likely expected them to persist.
         """
         if schema is None:
             return
-        gated = self.repo.gated_register_fields(schema.model_fields.keys())
+        fields = schema.model_fields.keys()
+        gated = self.repo.gated_register_fields(fields)
         if gated:
             logger.warning(
                 "register_schema %s declares privileged field(s) %s that registration "
-                "will ignore. /register may only set %s plus your own non-privileged "
-                "columns; remove these from the schema.",
+                "will ignore. /register may only set %s plus columns you opt in via "
+                "register_extra_fields; remove these from the schema.",
                 schema.__name__,
                 sorted(gated),
                 sorted(REGISTRATION_ALLOWED_FIELDS),
+            )
+        droppable = self.repo.droppable_register_fields(fields)
+        if droppable:
+            logger.warning(
+                "register_schema %s declares field(s) %s that map to model columns but "
+                "are not opted in; registration will drop them. Add them to "
+                "register_extra_fields=%s to persist them.",
+                schema.__name__,
+                sorted(droppable),
+                sorted(droppable),
             )
 
     # --- backend detection ---------------------------------------------------
     def _backend_config(self) -> tuple[str, str | None]:
         if self._session_transport is not None:
             return self._session_transport.backend, self._session_transport.redis_url
-        return "memory", None
+        return BACKEND_MEMORY, None
+
+    def _warn_on_memory_backend(self) -> None:
+        """Warn when an in-memory backend is active (the zero-config default).
+
+        In-memory state is per-process: under multiple workers it is not shared,
+        so login-lockout counters, sessions/CSRF tokens, and single-use token /
+        OAuth-state atomicity silently weaken. Production should use redis.
+        """
+        memory: list[str] = []
+        if isinstance(self.runtime.rate_limiter, MemoryRateLimiterBackend):
+            memory.append("rate limiter (lockout/throttle counters)")
+        if self._backend_config()[0] == BACKEND_MEMORY:
+            memory.append("sessions/CSRF and one-time-token/OAuth-state stores")
+        if not memory:
+            return
+        logger.warning(
+            "crudauth: using in-memory backend(s) - %s. In-memory state is per-process, so "
+            "under multiple workers it is NOT shared: lockout counters, sessions/CSRF, and "
+            "single-use token/OAuth-state atomicity weaken silently. Use redis in production "
+            "(redis_rate_limiter(...) and SessionTransport(backend='redis')), or pass "
+            "warn_on_memory_backend=False to silence.",
+            " and ".join(memory),
+        )
 
     # --- public: session manager --------------------------------------------
     @property
@@ -263,6 +366,13 @@ class CRUDAuth:
 
         providers = {}
         for name, creds in oauth.items():
+            if not self.repo.has(f"{name}_id"):
+                raise ValueError(
+                    f"OAuth provider {name!r} needs a '{name}_id' column on the user model "
+                    f"to store and match its account id. Add it (e.g. "
+                    f"'{name}_id: Mapped[str | None] = mapped_column(unique=True, index=True, "
+                    f"default=None)') or map it via column_map=."
+                )
             redirect_uri = f"{redirect_base_url.rstrip('/')}/oauth/{name}/callback"
             providers[name] = OAuthProviderFactory.create_provider(
                 name,
@@ -286,7 +396,50 @@ class CRUDAuth:
             default_redirect=redirect_base_url,
         )
 
+    # --- sudo wiring ---------------------------------------------------------
+    def _build_sudo(self, config: SudoConfig) -> None:
+        if self._session_transport is None:
+            raise ValueError(
+                "Sudo stamps the elevation on a server-side session; add a "
+                "SessionTransport to transports=[...]."
+            )
+        self.sudo = SudoManager(
+            session_manager=self.sessions,
+            repo=self.repo,
+            backend=self.runtime.rate_limiter,
+            hooks=self.hooks,
+            config=config,
+        )
+
     # --- the current_user() factory -----------------------------------------
+    async def _resolve_principal(
+        self, request: Request, db: Any, selected: list[Transport]
+    ) -> Principal | None:
+        """Run the transport loop once per request, per transport selection.
+
+        Cached on ``request.state`` so multiple gates over the same selection in
+        one request (e.g. ``current_user()`` plus a ``KeyBy.USER`` rate limit,
+        which calls ``current_user()`` internally) share a single authentication
+        - one transport loop, one user load, one CSRF check - instead of running
+        it once per dependency. Gates (superuser/scopes/check) are still applied
+        per call by the caller, on the shared principal.
+        """
+        cache = getattr(request.state, "_crudauth_principals", None)
+        if cache is None:
+            cache = {}
+            request.state._crudauth_principals = cache
+        key = tuple(t.name for t in selected)
+        if key in cache:
+            return cache[key]
+        ctx = AuthContext(request=request, db=db, runtime=self.runtime)
+        principal: Principal | None = None
+        for t in selected:
+            principal = await t.authenticate(request, ctx)
+            if principal is not None:
+                break
+        cache[key] = principal
+        return principal
+
     def current_user(
         self,
         *,
@@ -300,8 +453,16 @@ class CRUDAuth:
         """Build a FastAPI dependency that authenticates and authorizes a request.
 
         Every gate is a keyword: ``optional``, ``superuser``, ``verified``,
-        ``scopes``, ``transport`` (narrow to one/some transports), and ``check``
-        (an extra predicate run last, receiving the resolved principal).
+        ``scopes``, ``transport`` (narrow to one/some transports), and ``check``.
+
+        Note:
+            ``check`` is a predicate (sync or async) run last on the resolved
+            principal. Returning ``False`` denies the request with 403. To deny
+            with a custom status/message, raise your own exception from inside
+            ``check``. Returning ``None`` (or anything that isn't ``False``)
+            allows - so both styles work: a boolean predicate
+            (``check=lambda p: p.is_superuser``) and a raise-to-deny callback that
+            simply returns nothing on success.
 
         Note:
             Transports are tried in order, first credential wins. A transport
@@ -328,12 +489,7 @@ class CRUDAuth:
         async def dependency(
             request: Request, db: Annotated[Any, Depends(self.session)]
         ) -> Principal | None:
-            ctx = AuthContext(request=request, db=db, runtime=self.runtime)
-            principal: Principal | None = None
-            for t in selected:
-                principal = await t.authenticate(request, ctx)
-                if principal is not None:
-                    break
+            principal = await self._resolve_principal(request, db, selected)
 
             if principal is None:
                 if optional:
@@ -349,7 +505,42 @@ class CRUDAuth:
             if check is not None:
                 result = check(principal)
                 if inspect.isawaitable(result):
-                    await result
+                    result = await result
+                if result is False:
+                    raise ForbiddenException("Access denied")
+            return principal
+
+        return dependency
+
+    def require_sudo(self) -> Callable[..., Any]:
+        """Build a dependency that requires a current sudo elevation.
+
+        Authenticates like [current_user][crudauth.crud_auth.CRUDAuth.current_user]
+        (reusing the per-request principal cache) and then demands an unexpired
+        sudo stamp, raising 403 otherwise. Compose it with ``current_user`` gates
+        on the same route to also enforce identity/role:
+
+        Example:
+            ```python
+            @app.post("/account/close")
+            async def close(
+                user: Principal = Depends(auth.current_user(superuser=True)),
+                _: Principal = Depends(auth.require_sudo()),
+            ):
+                ...
+            ```
+
+        Raises:
+            RuntimeError: If sudo isn't configured (pass ``sudo=SudoConfig()``).
+        """
+        if self.sudo is None:
+            raise RuntimeError("Sudo is not configured; pass sudo=SudoConfig() to CRUDAuth.")
+        sudo = self.sudo
+        user_dep = self.current_user()
+
+        async def dependency(principal: Annotated[Principal, Depends(user_dep)]) -> Principal:
+            if not await sudo.is_elevated(principal):
+                raise ForbiddenException("Re-authentication required.")
             return principal
 
         return dependency
@@ -406,7 +597,8 @@ class CRUDAuth:
         if key is KeyBy.IP:
 
             async def by_ip(request: Request, response: Response) -> None:
-                await self._apply_rate_limit(response, action, get_client_ip(request), resolved)
+                ip = get_client_ip(request, self.runtime.trusted_proxy_hops)
+                await self._apply_rate_limit(response, action, ip, resolved)
 
             return by_ip
 
@@ -461,6 +653,32 @@ class CRUDAuth:
                 "scopes": list(user.scopes),
                 "via": user.transport,
             }
+
+        @router.post("/set-password")
+        async def set_password(
+            body: _SetPasswordIn,
+            principal: Annotated[Principal, Depends(self.current_user())],
+            db: Annotated[Any, Depends(self.session)],
+        ):
+            """Set a password for an account that doesn't have one (OAuth-only).
+
+            Note:
+                The active session/credential IS the re-authentication - there's
+                no current password to check because the account never had one.
+                This is **set**, not **change**: it refuses (400) if the account
+                already has a usable password (use the password-reset flow to
+                change an existing one). It does not evict other sessions/tokens
+                (establishing a first credential isn't a compromise response).
+            """
+            user = principal.user
+            if not is_unusable_password(self.repo.get(user, "hashed_password", "")):
+                raise BadRequestException(
+                    "Account already has a password; use the password reset flow to change it."
+                )
+            await self.repo.update(
+                db, user, {"hashed_password": get_password_hash(body.new_password)}
+            )
+            return {"detail": "Password set."}
 
         return router
 

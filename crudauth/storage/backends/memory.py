@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -116,8 +116,11 @@ class MemorySessionStorage(AbstractSessionStorage[T]):
         return key in self.data
 
     async def scan_keys(self, match: str | None = None) -> list[str]:
-        pattern = re.compile(match.replace("*", ".*")) if match else None
-        return [k for k in list(self.data.keys()) if pattern is None or pattern.fullmatch(k)]
+        """Enumerate keys by **glob** (e.g. ``"session:*"``), matching the Redis
+        backend's semantics. ``None`` returns all keys."""
+        if match is None:
+            return list(self.data.keys())
+        return [k for k in list(self.data.keys()) if fnmatch.fnmatchcase(k, match)]
 
     async def get_user_sessions(self, user_id: Any) -> list[str]:
         """Scan all sessions and return ids belonging to ``user_id``.
@@ -125,9 +128,13 @@ class MemorySessionStorage(AbstractSessionStorage[T]):
         Note:
             Reads the ``user_id`` field straight out of the serialized payload
             (the storage layer is model-agnostic, so it can't go through the
-            model). Meaningful only for ``user_id``-bearing models; entries
-            without that field are skipped.
+            model). The comparison is on the *stringified* id, matching how the
+            Redis backend keys its per-user index - so a UUID PK (which a JSON
+            round-trip turns into a string) still matches the ``UUID`` object the
+            caller passes. Meaningful only for ``user_id``-bearing models;
+            entries without that field are skipped.
         """
+        target = str(user_id)
         sessions: list[str] = []
         for key in list(self.data.keys()):
             if self._check_expiry(key):
@@ -136,12 +143,15 @@ class MemorySessionStorage(AbstractSessionStorage[T]):
                 payload = json.loads(self.data[key])
             except Exception:
                 continue
-            if isinstance(payload, dict) and payload.get("user_id") == user_id:
-                sessions.append(key[len(self.prefix) :])
+            if isinstance(payload, dict) and "user_id" in payload:
+                if str(payload["user_id"]) == target:
+                    sessions.append(key[len(self.prefix) :])
         return sessions
 
     async def delete_pattern(self, pattern: str) -> int:
-        keys = await self.scan_keys(f"{pattern}")
+        """Delete keys whose name starts with ``pattern`` (matches ``{pattern}*``),
+        the same prefix semantics as the Redis backend."""
+        keys = await self.scan_keys(f"{pattern}*")
         count = 0
         for key in keys:
             sid = key[len(self.prefix) :] if key.startswith(self.prefix) else key
