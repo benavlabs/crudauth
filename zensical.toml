@@ -71,6 +71,25 @@ edit_uri = "edit/main/docs/"
 [[project.nav]]
 "Why crudauth?" = "why-crudauth.md"
 
+[[project.nav]]
+"API Reference" = [
+    { "Overview" = "api/index.md" },
+    { "CRUDAuth" = "api/crud-auth.md" },
+    { "Principal" = "api/principal.md" },
+    { "Transports" = "api/transports.md" },
+    { "OAuth" = "api/oauth.md" },
+    { "Email" = "api/email.md" },
+    { "Hooks" = "api/hooks.md" },
+    { "Sudo" = "api/sudo.md" },
+    { "UserRepository" = "api/repository.md" },
+    { "Models" = "api/models.md" },
+    { "Rate limiting & lockout" = "api/ratelimit.md" },
+    { "Storage" = "api/storage.md" },
+    { "Core types" = "api/core.md" },
+    { "Exceptions" = "api/exceptions.md" },
+    { "Utilities" = "api/utils.md" },
+]
+
 # ==============================================================================
 # Markdown extensions
 # ==============================================================================
@@ -110,7 +129,9 @@ admonition = {}
 
 # ==============================================================================
 # Plugins
-#   mkdocstrings is enabled when the API Reference section is added (it needs the
-#   `docs` dependency group: `uv run --group docs zensical serve`). Until then,
-#   plain `uvx zensical serve` works with no extra deps.
+#   mkdocstrings needs the `docs` dependency group, so serve/build with:
+#   `uv run --group docs zensical serve`  (plain `uvx zensical` won't have it).
 # ==============================================================================
+
+[[project.plugins]]
+"mkdocstrings" = { config = { handlers = { python = { options = { docstring_style = "google", show_source = false, show_root_heading = true, show_symbol_type_heading = true, show_symbol_type_toc = true, members_order = "source", separate_signature = true, show_signature_annotations = true, signature_crossrefs = true, merge_init_into_class = true, heading_level = 2 } } } } }
