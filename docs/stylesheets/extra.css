@@ -8,6 +8,16 @@
     --md-accent-fg-color: #14b8a6;
 }
 
+/* Center markdown tables: they shrink to their content, and left-aligned narrow
+   tables look off against the full-width prose and code. */
+.md-typeset__table {
+    display: block;
+}
+.md-typeset__table table {
+    margin-left: auto;
+    margin-right: auto;
+}
+
 /* Dark mode: a very dark gray rather than near-black. */
 [data-md-color-scheme="slate"] {
     --md-default-bg-color: #1a1d23;

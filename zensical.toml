@@ -33,6 +33,7 @@ features = [
     "search.highlight",
     "content.code.copy",
     "content.code.annotate",
+    "content.tooltips",
     "toc.follow",
 ]
 
@@ -72,6 +73,16 @@ edit_uri = "edit/main/docs/"
 "Why crudauth?" = "why-crudauth.md"
 
 [[project.nav]]
+"Guides" = [
+    { "Overview" = "guides/index.md" },
+    { "Authentication" = [
+        { "Overview" = "guides/auth/index.md" },
+        { "Protecting routes" = "guides/auth/protecting-routes.md" },
+        { "Sessions" = "guides/auth/sessions.md" },
+    ] },
+]
+
+[[project.nav]]
 "API Reference" = [
     { "Overview" = "api/index.md" },
     { "CRUDAuth" = "api/crud-auth.md" },
@@ -98,6 +109,9 @@ edit_uri = "edit/main/docs/"
 admonition = {}
 
 [[project.markdown_extensions]]
+"abbr" = {}
+
+[[project.markdown_extensions]]
 "codehilite" = {}
 
 [[project.markdown_extensions]]
@@ -113,7 +127,8 @@ admonition = {}
 "pymdownx.inlinehilite" = {}
 
 [[project.markdown_extensions]]
-"pymdownx.snippets" = {}
+# auto-append the glossary so abbreviations get hover tooltips on every page
+"pymdownx.snippets" = { auto_append = ["includes/abbreviations.md"], base_path = ["."] }
 
 [[project.markdown_extensions]]
 "pymdownx.superfences" = {}
