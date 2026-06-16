@@ -15,7 +15,7 @@ Link any related issues or PRs.
 - [ ] `uv run pytest` passes
 - [ ] Added or updated tests for the change (if applicable)
 - [ ] Updated the docs if behavior changed (if applicable)
-- [ ] Kept imports pointing inward per [crudauth/ARCHITECTURE.md](../crudauth/ARCHITECTURE.md)
+- [ ] Kept imports pointing inward (see the [Architecture docs](https://benavlabs.github.io/crudauth/architecture/))
 
 ## Notes
 

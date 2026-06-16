@@ -173,9 +173,9 @@ primitives.
 ## Architecture
 
 crudauth is ports-and-adapters with feature slices and a single composition
-root (`CRUDAuth`). The layering and the import-direction rules live in
-[`crudauth/ARCHITECTURE.md`](crudauth/ARCHITECTURE.md) - read it before adding a
-transport, OAuth provider, or storage backend; each is meant to be a drop-in
+root (`CRUDAuth`). The layering and the import-direction rules live in the
+[Architecture docs](https://benavlabs.github.io/crudauth/architecture/) - read them before
+adding a transport, OAuth provider, or storage backend; each is meant to be a drop-in
 file, not a cross-cutting edit.
 
 ## License

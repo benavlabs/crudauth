@@ -1,0 +1,94 @@
+# Email flows
+
+crudauth runs three email flows: verify an address, reset a password, and change an address.
+Each is a two-step request/confirm cycle. crudauth composes the message and signs a
+single-use token; you deliver the email; your frontend turns the click into a confirm call.
+
+## Configure a sender
+
+On top of the [base setup](../../getting-started.md), email needs two things: an
+`EmailSender` (how a message goes out) and an `EmailConfig` (where the links point). Together
+they enable the six routes below.
+
+```python title="main.py"
+from crudauth import CRUDAuth, EmailConfig, EmailSender
+
+class MySender(EmailSender):
+    async def send(self, *, to, subject, body, kind):
+        # crudauth already built the subject and body (with the link). You deliver it.
+        await tasks.enqueue(send_email, to=to, subject=subject, html=body)
+
+auth = CRUDAuth(
+    session=get_session, user_model=User, SECRET_KEY="change-me",
+    email=EmailConfig(sender=MySender(), frontend_url="https://app.example.com"),
+)
+app.include_router(auth.router)   # adds the verify / reset / change routes
+```
+
+Prefer enqueueing onto a task queue over blocking on SMTP here: registration sends are
+best-effort (a failure is logged), but the verify/reset/change flows surface a raised send as
+a 5xx.
+
+<p align="center">
+  <img src="../../assets/diagrams/email-flow-light.png#only-light" alt="Three-step email flow: a request endpoint always returns 200, crudauth signs a single-use token and your EmailSender delivers the link, and the confirm endpoint verifies and consumes the token once" width="100%">
+  <img src="../../assets/diagrams/email-flow-dark.png#only-dark" alt="Three-step email flow: a request endpoint always returns 200, crudauth signs a single-use token and your EmailSender delivers the link, and the confirm endpoint verifies and consumes the token once" width="100%">
+</p>
+
+## The link, and your frontend's job
+
+crudauth puts the token in the link as a query parameter:
+
+```text
+{frontend_url}{path}?token=<signed-token>
+# e.g. https://app.example.com/reset-password?token=eyJ...
+```
+
+That link points at **your** frontend, not at crudauth. Your page reads `token` from the URL
+and POSTs it to the matching confirm endpoint. The paths default to `/verify-email`,
+`/reset-password`, and `/confirm-email-change`, and are configurable on `EmailConfig`.
+
+## Walk-through: password reset
+
+```bash
+# 1. the user asks for a reset (always returns 200, even if the address is unknown)
+curl -X POST http://localhost:8000/password/reset-request \
+  -H "Content-Type: application/json" -d '{"email": "alice@example.com"}'
+
+# 2. they click the emailed link; your /reset-password page reads ?token=... and submits:
+curl -X POST http://localhost:8000/password/reset-confirm \
+  -H "Content-Type: application/json" \
+  -d '{"token": "eyJ...", "new_password": "a-new-strong-one"}'
+```
+
+Verify and change-email follow the same shape, with different bodies (below).
+
+## The routes
+
+| Method & path | Body | What it does |
+|---|---|---|
+| `POST /email/verify-request` | `{email}` | Send a verification link. |
+| `POST /email/verify-confirm` | `{token}` | Consume the token, mark `email_verified`. |
+| `POST /password/reset-request` | `{email}` | Send a reset link. |
+| `POST /password/reset-confirm` | `{token, new_password}` | Set the new password, revoke outstanding tokens. |
+| `POST /email/change-request` | `{new_email, password}` | Authenticated; send a link to the **new** address. |
+| `POST /email/change-confirm` | `{token}` | Swap the email and mark it verified. |
+
+The `-request` endpoints always return `200`, whether or not the address exists, so they
+don't leak which accounts are registered. Tokens are single-use and time-limited
+(`verify_ttl_hours`, `reset_ttl_hours`, `change_ttl_hours` on `EmailConfig`).
+
+## Hooks
+
+`on_after_email_verified`, `on_after_password_reset`, and `on_after_email_changed` fire after
+the matching confirm, so you can grant access, send a notice, or write an audit record.
+
+## Security notes
+
+- A password reset bumps the user's `token_version`, invalidating every bearer token issued
+  before the reset, and evicts the user's other sessions.
+- The change-email link is sent to the **new** address, so confirming it proves control.
+- `-request` endpoints are throttled per address and per IP.
+
+---
+
+[Next: Passwords →](passwords.md){ .md-button .md-button--primary }

@@ -33,6 +33,7 @@ features = [
     "search.highlight",
     "content.code.copy",
     "content.code.annotate",
+    "content.tooltips",
     "toc.follow",
 ]
 
@@ -72,6 +73,36 @@ edit_uri = "edit/main/docs/"
 "Why crudauth?" = "why-crudauth.md"
 
 [[project.nav]]
+"Getting started" = "getting-started.md"
+
+[[project.nav]]
+"Guides" = [
+    { "Overview" = "guides/index.md" },
+    { "Authentication" = [
+        { "Overview" = "guides/auth/index.md" },
+        { "Protecting routes" = "guides/auth/protecting-routes.md" },
+        { "Sessions" = "guides/auth/sessions.md" },
+        { "Bearer tokens" = "guides/auth/bearer.md" },
+        { "Multiple transports" = "guides/auth/multiple-transports.md" },
+        { "OAuth" = "guides/auth/oauth.md" },
+        { "Sudo mode" = "guides/auth/sudo.md" },
+    ] },
+    { "Accounts" = [
+        { "Overview" = "guides/accounts/index.md" },
+        { "Registration" = "guides/accounts/registration.md" },
+        { "Email flows" = "guides/accounts/email.md" },
+        { "Passwords" = "guides/accounts/passwords.md" },
+        { "Devices & sessions" = "guides/accounts/session-management.md" },
+    ] },
+    { "Infrastructure" = [
+        { "Overview" = "guides/infra/index.md" },
+        { "Storage & lifespan" = "guides/infra/storage.md" },
+        { "Rate limiting & lockout" = "guides/infra/rate-limiting.md" },
+        { "Hooks" = "guides/infra/hooks.md" },
+    ] },
+]
+
+[[project.nav]]
 "API Reference" = [
     { "Overview" = "api/index.md" },
     { "CRUDAuth" = "api/crud-auth.md" },
@@ -90,12 +121,29 @@ edit_uri = "edit/main/docs/"
     { "Utilities" = "api/utils.md" },
 ]
 
+[[project.nav]]
+"Architecture" = "architecture.md"
+
+[[project.nav]]
+"Community" = [
+    { "Overview" = "community/index.md" },
+    { "Contributing" = "community/contributing.md" },
+    { "Code of Conduct" = "community/code-of-conduct.md" },
+    { "License" = "community/license.md" },
+]
+
+[[project.nav]]
+"Changelog" = "changelog.md"
+
 # ==============================================================================
 # Markdown extensions
 # ==============================================================================
 
 [[project.markdown_extensions]]
 admonition = {}
+
+[[project.markdown_extensions]]
+"abbr" = {}
 
 [[project.markdown_extensions]]
 "codehilite" = {}
@@ -113,7 +161,9 @@ admonition = {}
 "pymdownx.inlinehilite" = {}
 
 [[project.markdown_extensions]]
-"pymdownx.snippets" = {}
+# auto-append the glossary so abbreviations get hover tooltips on every page.
+# It's a .txt so zensical injects it as a snippet but doesn't build it as a page.
+"pymdownx.snippets" = { auto_append = ["includes/abbreviations.txt"], base_path = ["docs"] }
 
 [[project.markdown_extensions]]
 "pymdownx.superfences" = {}
