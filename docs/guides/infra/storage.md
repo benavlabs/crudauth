@@ -1,6 +1,6 @@
 # Storage & lifespan
 
-crudauth keeps server-side state in a pluggable store: sessions, CSRF tokens, login-lockout
+CRUDAuth keeps server-side state in a pluggable store: sessions, CSRF tokens, login-lockout
 counters, and single-use email and OAuth tokens. In-memory is the zero-config default and
 fine for development; Redis is what you want in production.
 
@@ -13,7 +13,7 @@ fine for development; Redis is what you want in production.
 
 Nothing to configure. The catch: state lives in the process, so under multiple workers
 (`uvicorn --workers 4`, gunicorn, several pods) it isn't shared. That silently weakens
-lockout counters, sessions, and one-time-token atomicity. crudauth logs a startup warning
+lockout counters, sessions, and one-time-token atomicity. CRUDAuth logs a startup warning
 whenever an in-memory backend is active. Use it for development, tests, and single-worker
 deployments.
 

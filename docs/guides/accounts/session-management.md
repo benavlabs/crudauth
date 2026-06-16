@@ -3,7 +3,7 @@
 Every login is a separate server-side session, so you can show users where they're signed in
 and let them sign out of one device or all of them.
 
-These aren't built-in routes. crudauth exposes the session manager as `auth.sessions`
+These aren't built-in routes. CRUDAuth exposes the session manager as `auth.sessions`
 whenever a `SessionTransport` is configured (the default), and you add the endpoints your UI
 needs on top of it:
 

@@ -1,6 +1,6 @@
 # Exceptions
 
-The HTTP exceptions crudauth raises. All subclass `CustomException`, which is a FastAPI
+The HTTP exceptions CRUDAuth raises. All subclass `CustomException`, which is a FastAPI
 `HTTPException`, so they propagate with the right status code and headers.
 
 ::: crudauth.exceptions.CustomException

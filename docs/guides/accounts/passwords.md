@@ -1,6 +1,6 @@
 # Passwords
 
-How crudauth stores passwords, lets an OAuth-only user set one, and resets a forgotten one.
+How CRUDAuth stores passwords, lets an OAuth-only user set one, and resets a forgotten one.
 
 Storage and `POST /set-password` come with the base app; the reset flow additionally needs
 email configured:

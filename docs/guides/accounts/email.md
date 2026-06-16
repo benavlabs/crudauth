@@ -1,7 +1,7 @@
 # Email flows
 
-crudauth runs three email flows: verify an address, reset a password, and change an address.
-Each is a two-step request/confirm cycle. crudauth composes the message and signs a
+CRUDAuth runs three email flows: verify an address, reset a password, and change an address.
+Each is a two-step request/confirm cycle. CRUDAuth composes the message and signs a
 single-use token; you deliver the email; your frontend turns the click into a confirm call.
 
 ## Configure a sender
@@ -36,7 +36,7 @@ a 5xx.
 
 ## The link, and your frontend's job
 
-crudauth puts the token in the link as a query parameter:
+CRUDAuth puts the token in the link as a query parameter:
 
 ```text
 {frontend_url}{path}?token=<signed-token>
