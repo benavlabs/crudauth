@@ -2,7 +2,7 @@
 
 Bearer tokens are the transport for non-browser clients: APIs, mobile apps, and CLIs. A
 client logs in once, gets a short-lived access token, and sends it in the `Authorization`
-header. crudauth issues stateless JWTs and pairs them with a long-lived refresh token.
+header. CRUDAuth issues stateless JWTs and pairs them with a long-lived refresh token.
 
 ```python
 from crudauth import CRUDAuth, SessionTransport, BearerTransport
@@ -88,7 +88,7 @@ it, so a credential can't widen its own authority.
 
 ## Revoking tokens
 
-JWTs are stateless, so they can't be deleted one by one. crudauth embeds a `token_version`
+JWTs are stateless, so they can't be deleted one by one. CRUDAuth embeds a `token_version`
 epoch in every token and stores it on the user. A password reset bumps the user's
 `token_version`, which invalidates every token issued before the reset in one step.
 

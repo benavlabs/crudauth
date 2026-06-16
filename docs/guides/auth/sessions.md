@@ -1,6 +1,6 @@
 # Sessions
 
-Sessions are crudauth's default transport. With no `transports=` argument you get cookie
+Sessions are CRUDAuth's default transport. With no `transports=` argument you get cookie
 auth backed by a server-side session store, CSRF protection, and the `/login`, `/logout`,
 `/register`, and `/me` routes:
 

@@ -41,7 +41,7 @@ backend without touching callers: `transports/` (session, bearer), `ratelimit/`,
   <img src="assets/diagrams/request-flow-dark.png#only-dark" alt="A request arrives with a cookie or token; the transport loop validates the credential, enforces CSRF, and resolves the user into one Principal cached on request.state; the gates (superuser, scopes, check) then authorize it" width="100%">
 </p>
 
-When a route depends on `current_user()`, crudauth runs the transport loop once and caches the
+When a route depends on `current_user()`, CRUDAuth runs the transport loop once and caches the
 result on `request.state`, so combining gates (and a `KeyBy.USER` rate limit that resolves the
 user internally) does one authentication, not several:
 

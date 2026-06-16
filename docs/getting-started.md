@@ -22,7 +22,7 @@ OAuth, Redis, and device parsing are extras: `pip install "crudauth[all]"`.
 
 ## Your user model
 
-Inherit `AuthUserMixin` to get the columns crudauth needs; add your own freely.
+Inherit `AuthUserMixin` to get the columns CRUDAuth needs; add your own freely.
 
 ```python title="models.py"
 from sqlalchemy.orm import Mapped, mapped_column

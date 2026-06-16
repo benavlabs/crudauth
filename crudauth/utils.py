@@ -25,12 +25,20 @@ __all__ = [
 
 
 def _bcrypt_input(password: str) -> bytes:
-    """Pre-hash to a fixed-size token so bcrypt's 72-byte ceiling never truncates.
+    """Length-normalize the password for bcrypt; not the password hash itself.
 
     bcrypt silently ignores input past 72 bytes, which would make two long
-    passwords sharing a 72-byte prefix interchangeable. SHA-256 then base64
-    yields a 44-byte value (well under 72) that depends on the whole password,
-    so the bcrypt comparison covers every byte the user typed.
+    passwords sharing a 72-byte prefix interchangeable. Hashing to SHA-256 and
+    base64-encoding yields a fixed 44-byte value (well under 72) that depends on
+    every byte typed, so the bcrypt comparison covers the whole password.
+
+    Note:
+        The actual password KDF is bcrypt (slow, salted, in [get_password_hash]
+        [crudauth.utils.get_password_hash]); this SHA-256 step is only a
+        fixed-width transform and is never stored or relied on for slowness. A
+        static analyzer may flag the SHA-256 call as "weak password hashing" -
+        that is a false positive, since the stored hash is bcrypt, not this
+        digest. This is the same construction Django and passlib use.
     """
     digest = hashlib.sha256(password.encode()).digest()
     return base64.b64encode(digest)

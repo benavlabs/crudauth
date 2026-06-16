@@ -76,6 +76,21 @@ edit_uri = "edit/main/docs/"
 "Getting started" = "getting-started.md"
 
 [[project.nav]]
+"Learn" = [
+    { "Learning path" = "learn/index.md" },
+    { "0. How web auth works" = "learn/0-how-web-auth-works.md" },
+    { "1. How auth goes wrong" = "learn/1-how-auth-goes-wrong.md" },
+    { "2. Your first protected route" = "learn/2-your-first-protected-route.md" },
+    { "3. Modeling your user" = "learn/3-modeling-your-user.md" },
+    # { "4. Sessions, cookies, and CSRF" = "learn/4-sessions-cookies-and-csrf.md" },
+    # { "5. An API for your app" = "learn/5-an-api-for-your-app.md" },
+    # { "6. Sign in with Google" = "learn/6-let-users-sign-in-with-google.md" },
+    # { "7. Emails: verify, reset, change" = "learn/7-emails-verify-reset-change.md" },
+    # { "8. Hardening before you ship" = "learn/8-hardening-before-you-ship.md" },
+    # { "9. Going to production" = "learn/9-going-to-production.md" },
+]
+
+[[project.nav]]
 "Guides" = [
     { "Overview" = "guides/index.md" },
     { "Authentication" = [

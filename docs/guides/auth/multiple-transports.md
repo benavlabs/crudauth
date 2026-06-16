@@ -1,7 +1,7 @@
 # Multiple transports
 
 A web app and an API often live in the same backend. The browser wants a cookie session;
-the API wants a bearer token. With crudauth you enable both transports and your routes don't
+the API wants a bearer token. With CRUDAuth you enable both transports and your routes don't
 change, because every transport resolves to the same Principal.
 
 ```python

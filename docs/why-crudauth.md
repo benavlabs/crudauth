@@ -51,7 +51,7 @@ A browser app wants a cookie session with CSRF. An API, mobile app, or CLI wants
 stateless bearer token. Many libraries tie one of those to the dependency your routes call,
 so supporting both means a second identity path through every endpoint.
 
-crudauth resolves any transport to the same `Principal`. Your route asks for the principal;
+CRUDAuth resolves any transport to the same `Principal`. Your route asks for the principal;
 it never depends on how the request authenticated.
 
 <p align="center">
@@ -73,7 +73,7 @@ When more than one credential is present, the first transport you list wins. Gat
 
 ## Your user model stays yours
 
-crudauth adapts to your SQLAlchemy model instead of owning it. Inherit a mixin, or map the
+CRUDAuth adapts to your SQLAlchemy model instead of owning it. Inherit a mixin, or map the
 logical fields onto a table you already have:
 
 ```python
@@ -109,13 +109,13 @@ crudauth is a focused library, not an identity platform.
 
 !!! note "Reach for something else when"
 
-    **You want a ready-made user-management UI.** crudauth gives you the auth surface, not
+    **You want a ready-made user-management UI.** CRUDAuth gives you the auth surface, not
     the screens. Pair it with [CRUDAdmin](https://github.com/benavlabs/crudadmin).
 
     **You'd rather not run auth at all.** A hosted provider (Auth0, Clerk, WorkOS) owns more
     of the problem, at a price and a vendor dependency.
 
-    **You need enterprise SSO.** crudauth does OAuth 2.0 social login, not SAML or SCIM
+    **You need enterprise SSO.** CRUDAuth does OAuth 2.0 social login, not SAML or SCIM
     provisioning.
 
     **You only need one "Sign in with Google".** A single OAuth flow with no sessions or
@@ -130,7 +130,7 @@ Each step is additive, and none of them change how your routes authorize:
 1. **Start with sessions.** The default gives cookie auth, CSRF, lockout, and the auth routes.
 2. **Add an API.** Put `BearerTransport()` in `transports=`.
 3. **Add social login.** Pass `oauth={...}` with your provider credentials.
-4. **Add email flows.** Implement the `EmailSender` port; crudauth signs and verifies the tokens.
+4. **Add email flows.** Implement the `EmailSender` port; CRUDAuth signs and verifies the tokens.
 5. **Harden for production.** Move backends to Redis, set `trusted_proxy_hops`, gate sensitive actions behind `sudo`.
 6. **Add policy.** Register `AuthHooks` for welcome emails, trials, and audit logging.
 

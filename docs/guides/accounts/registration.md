@@ -48,7 +48,7 @@ auth = CRUDAuth(..., register_schema=RegisterIn, register_extra_fields={"full_na
 ```
 
 A field declared in the schema but not opted into `register_extra_fields` is dropped (with a
-startup warning). crudauth's privileged fields (`is_superuser`, `email_verified`, ...) can
+startup warning). CRUDAuth's privileged fields (`is_superuser`, `email_verified`, ...) can
 **never** be opted in; declaring one is logged and ignored.
 
 ## Duplicate emails

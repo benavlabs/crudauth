@@ -34,13 +34,13 @@ is `{redirect_base_url}/oauth/{provider}/callback`.
   <img src="../../assets/diagrams/oauth-flow-dark.png#only-dark" alt="The four-step OAuth authorization-code flow: your app redirects out with a state, the provider signs the user in, the callback returns a code and state which crudauth rechecks, then crudauth exchanges the code, links the user, and logs them in" width="100%">
 </p>
 
-crudauth binds the `state` parameter to the initiating browser via a cookie, so a stolen or
+CRUDAuth binds the `state` parameter to the initiating browser via a cookie, so a stolen or
 forged callback can't complete someone else's login. The redirect target after login is
 validated against an allowlist to prevent open redirects.
 
 ## Account linking
 
-On a successful callback, crudauth finds or creates the user:
+On a successful callback, CRUDAuth finds or creates the user:
 
 - If a user already exists with the provider's verified email, the provider account is linked
   to it (the `{provider}_id` column is set). The user can then sign in by password or by that
