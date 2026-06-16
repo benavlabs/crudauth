@@ -73,6 +73,9 @@ edit_uri = "edit/main/docs/"
 "Why crudauth?" = "why-crudauth.md"
 
 [[project.nav]]
+"Getting started" = "getting-started.md"
+
+[[project.nav]]
 "Guides" = [
     { "Overview" = "guides/index.md" },
     { "Authentication" = [
@@ -83,6 +86,13 @@ edit_uri = "edit/main/docs/"
         { "Multiple transports" = "guides/auth/multiple-transports.md" },
         { "OAuth" = "guides/auth/oauth.md" },
         { "Sudo mode" = "guides/auth/sudo.md" },
+    ] },
+    { "Accounts" = [
+        { "Overview" = "guides/accounts/index.md" },
+        { "Registration" = "guides/accounts/registration.md" },
+        { "Email flows" = "guides/accounts/email.md" },
+        { "Passwords" = "guides/accounts/passwords.md" },
+        { "Devices & sessions" = "guides/accounts/session-management.md" },
     ] },
 ]
 

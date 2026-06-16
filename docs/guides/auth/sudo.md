@@ -76,4 +76,4 @@ auth = CRUDAuth(..., hooks=AuthHooks(on_after_sudo=on_sudo))
 
 ---
 
-[Next: API reference →](../../api/index.md){ .md-button .md-button--primary }
+[Next: Registration →](../accounts/registration.md){ .md-button .md-button--primary }

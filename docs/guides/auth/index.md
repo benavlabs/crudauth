@@ -1,6 +1,8 @@
 # Authentication
 
-How to authenticate requests and authorize them, whichever transport the caller uses.
+How to authenticate requests and authorize them, whichever transport the caller uses. Every
+transport resolves to the same [`Principal`](../../api/principal.md), so your authorization
+code never depends on how the request arrived.
 
 <div class="grid cards" markdown>
 
@@ -54,3 +56,21 @@ How to authenticate requests and authorize them, whichever transport the caller 
     [Sudo mode →](sudo.md)
 
 </div>
+
+## Where to start
+
+!!! tip "Not sure which to read first?"
+
+    **New to crudauth?** [Protecting routes](protecting-routes.md) covers the one dependency
+    you'll use everywhere.
+
+    **Browser app?** [Sessions](sessions.md) is the default and needs no configuration.
+
+    **API, mobile, or CLI?** [Bearer tokens](bearer.md).
+
+    **Supporting both at once?** [Multiple transports](multiple-transports.md).
+
+    **Adding social login?** [OAuth](oauth.md). **Gating destructive actions?**
+    [Sudo mode](sudo.md).
+
+[Start with Protecting routes →](protecting-routes.md){ .md-button .md-button--primary }
