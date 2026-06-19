@@ -126,6 +126,7 @@ edit_uri = "edit/main/docs/"
     { "OAuth" = "api/oauth.md" },
     { "Email" = "api/email.md" },
     { "Hooks" = "api/hooks.md" },
+    { "Provisioning" = "api/provisioning.md" },
     { "Sudo" = "api/sudo.md" },
     { "UserRepository" = "api/repository.md" },
     { "Models" = "api/models.md" },

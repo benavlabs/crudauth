@@ -34,6 +34,7 @@ from .crud_auth import CRUDAuth
 from .hooks import AuthHooks, HookContext
 from .oauth import OAuthCredentials
 from .principal import Principal
+from .provisioning import NewUserContext, NewUserFields
 from .sudo import SudoConfig
 from .transports import BearerTransport, SessionTransport
 
@@ -50,6 +51,8 @@ __all__ = [
     "EmailSender",
     "AuthHooks",
     "HookContext",
+    "NewUserContext",
+    "NewUserFields",
     "Transport",
     "AuthContext",
     "CookieConfig",

@@ -45,7 +45,9 @@ On a successful callback, CRUDAuth finds or creates the user:
 - If a user already exists with the provider's verified email, the provider account is linked
   to it (the `{provider}_id` column is set). The user can then sign in by password or by that
   provider.
-- Otherwise a new user is created from the provider profile.
+- Otherwise a new user is created from the provider profile. To set your own columns on that
+  user (a required `name`, a default tier), use `new_user_fields` / `new_user_defaults`, which
+  run on this path too; see [Registration](../accounts/registration.md#setting-columns-the-server-controls).
 
 ## Custom providers
 

@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..exceptions import BadRequestException
+from ..provisioning import NewUserContext, NewUserFields, resolve_new_user_fields
 from ..repository import UserRepository
 from ..utils import canonical_email, make_unusable_password
 from .constants import (
@@ -37,8 +38,15 @@ def _sanitize_username(raw: str) -> str:
 
 
 class OAuthAccountService:
-    def __init__(self, repo: UserRepository):
+    def __init__(
+        self,
+        repo: UserRepository,
+        new_user_fields: NewUserFields | None = None,
+        new_user_defaults: dict[str, Any] | None = None,
+    ):
         self.repo = repo
+        self.new_user_fields = new_user_fields
+        self.new_user_defaults = new_user_defaults or {}
 
     async def get_or_create_user(self, info: OAuthUserInfo, db: AsyncSession) -> tuple[Any, bool]:
         """Resolve an OAuth identity to a user; lookup order: provider id → email → create.
@@ -117,6 +125,21 @@ class OAuthAccountService:
             "oauth_created_at": now,
             "oauth_updated_at": now,
         }
+        data.update(self.new_user_defaults)
+        data.update(
+            await resolve_new_user_fields(
+                self.new_user_fields,
+                NewUserContext(
+                    email=data["email"],
+                    username=data["username"],
+                    source="oauth",
+                    db=db,
+                    register_data=None,
+                    oauth=info,
+                ),
+                self.repo,
+            )
+        )
         try:
             return await self.repo.create(db, data)
         except IntegrityError:

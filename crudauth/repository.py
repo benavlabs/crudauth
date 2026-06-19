@@ -8,6 +8,7 @@ schema to adopt the library.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from typing import Any
 
@@ -20,6 +21,8 @@ from .constants import (
     REGISTRATION_GATED_FIELDS,
 )
 from .utils import canonical_email
+
+logger = logging.getLogger("crudauth")
 
 __all__ = [
     "UserRepository",
@@ -42,6 +45,7 @@ class UserRepository:
         self.model = model
         self.column_map = column_map or {}
         self.register_extra_fields = frozenset(register_extra_fields or ())
+        self._warned_provisioning_keys: set[str] = set()
 
     # --- contract translation ------------------------------------------------
     def col(self, logical: str) -> str:
@@ -193,6 +197,41 @@ class UserRepository:
         allowed = self._allowed_register_names()
         gated = self._gated_names()
         return {k: v for k, v in data.items() if k in allowed and k not in gated}
+
+    def _contract_names(self) -> set[str]:
+        """Every crudauth logical field, by logical AND mapped column name."""
+        return set(LOGICAL_FIELDS) | {self.col(f) for f in LOGICAL_FIELDS}
+
+    def filter_provisioning_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Keep only app columns from a ``new_user_fields`` callback.
+
+        Drops any key that is a crudauth logical field (by logical *or* mapped
+        column name) and logs a warning, so the callback can fill the app's own
+        columns at signup but can never override identity, privilege, or state
+        crudauth owns (``email``, ``hashed_password``, ``is_superuser``,
+        ``email_verified``, the oauth linkage, the PK). The dropped key keeps
+        crudauth's authoritative value.
+
+        Note:
+            The callback runs per signup, so a misconfigured one would drop the
+            same key on every registration. Each distinct dropped field is warned
+            only ONCE per process (deduped across the constant ``new_user_defaults``
+            and the runtime callback) so a standing misconfiguration can't flood
+            the logs.
+        """
+        contract = self._contract_names()
+        kept = {k: v for k, v in data.items() if k not in contract}
+        new_drops = sorted(
+            k for k in data if k in contract and k not in self._warned_provisioning_keys
+        )
+        if new_drops:
+            self._warned_provisioning_keys.update(new_drops)
+            logger.warning(
+                "crudauth: new_user_fields tried to set crudauth-owned field(s) %s; "
+                "dropped (crudauth's value is authoritative). Return only app columns.",
+                new_drops,
+            )
+        return kept
 
     # --- writes --------------------------------------------------------------
     async def create(self, db: AsyncSession, data: dict[str, Any]) -> Any:

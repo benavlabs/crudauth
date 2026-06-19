@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from ..constants import MIN_PASSWORD_LENGTH
 from ..exceptions import DuplicateValueException
 from ..hooks import HookContext
+from ..provisioning import NewUserContext, resolve_new_user_fields
 from ..ratelimit import KeyBy
 from ..utils import get_client_ip, get_password_hash
 
@@ -88,6 +89,7 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
         email_on = auth._email_service is not None
         data = cast(BaseModel, body).model_dump()
         password = data.pop("password")
+        submitted = dict(data)
         data = auth.repo.filter_registration_data(data)
         email = data.pop("email")
         username = data.pop("username")
@@ -135,6 +137,21 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
             "hashed_password": get_password_hash(password),
         }
         create_data.update(data)
+        create_data.update(auth._new_user_defaults)
+        create_data.update(
+            await resolve_new_user_fields(
+                auth.new_user_fields,
+                NewUserContext(
+                    email=email,
+                    username=username,
+                    source="register",
+                    db=db,
+                    register_data=submitted,
+                    oauth=None,
+                ),
+                auth.repo,
+            )
+        )
 
         try:
             user = await auth.repo.create(db, create_data)

@@ -41,6 +41,7 @@ from .hooks import AuthHooks
 from .oauth import OAuthAccountService, OAuthProviderFactory
 from .oauth.router import build_oauth_router
 from .principal import Principal
+from .provisioning import NewUserFields
 from .ratelimit import (
     DEFAULT_RATE_LIMITS,
     KeyBy,
@@ -105,6 +106,8 @@ class CRUDAuth:
         cookies: CookieConfig | None = None,
         register_schema: type[BaseModel] | None = None,
         register_extra_fields: set[str] | None = None,
+        new_user_fields: NewUserFields | None = None,
+        new_user_defaults: dict[str, Any] | None = None,
         rate_limiter: "RateLimiterBackend | None" = None,
         rate_limits: dict[str, RateLimit] | None = None,
         trusted_proxy_hops: int = 0,
@@ -143,6 +146,22 @@ class CRUDAuth:
                 so adding a column to your model never silently becomes settable
                 at signup. crudauth's privileged fields (``is_superuser``,
                 ``email_verified``, ...) can never be opted in.
+            new_user_defaults: Constant app columns to set on every new user, on
+                BOTH ``/register`` and OAuth signup (e.g. ``{"tier_id": FREE}``).
+                The declarative shortcut for fixed values; gated like
+                ``new_user_fields`` (a crudauth-owned key is dropped + warned at
+                construction).
+            new_user_fields: Callback (sync or async) returning extra columns to
+                set when crudauth creates a user, for values that must be
+                *derived* (and may read the DB) rather than constant - e.g.
+                ``lambda ctx: {"name": ctx.suggested_name}``. Receives a trusted
+                [NewUserContext][crudauth.provisioning.NewUserContext] (never the
+                request body) and returns app columns only, as a ``dict`` or a
+                ``BaseModel``; any crudauth logical field it returns is dropped
+                (crudauth stays authoritative). Merged into the single insert
+                after ``new_user_defaults``, so a derived value can override a
+                constant default. Client-typed fields belong in ``register_schema``
+                /``register_extra_fields``, not here.
             rate_limiter: Backend for lockout/throttles; defaults to an in-process
                 [MemoryRateLimiterBackend][crudauth.ratelimit.backends.memory.MemoryRateLimiterBackend]. Use
                 ``redis_rate_limiter(...)`` in production.
@@ -174,6 +193,8 @@ class CRUDAuth:
             raise ValueError("SECRET_KEY is required")
         self.session = session
         self.repo = UserRepository(user_model, column_map, register_extra_fields)
+        self.new_user_fields = new_user_fields
+        self._new_user_defaults = self.repo.filter_provisioning_data(new_user_defaults or {})
         self.hooks = hooks or AuthHooks()
         self.transports: list[Transport] = list(transports) if transports else [SessionTransport()]
         self._register_schema = register_schema
@@ -391,7 +412,9 @@ class CRUDAuth:
             runtime=self.runtime,
             providers=providers,
             state_storage=state_storage,
-            account_service=OAuthAccountService(self.repo),
+            account_service=OAuthAccountService(
+                self.repo, self.new_user_fields, self._new_user_defaults
+            ),
             session_manager=self.sessions,
             default_redirect=redirect_base_url,
         )
@@ -669,6 +692,14 @@ class CRUDAuth:
                 already has a usable password (use the password-reset flow to
                 change an existing one). It does not evict other sessions/tokens
                 (establishing a first credential isn't a compromise response).
+
+            Note:
+                Allowed over any transport. On the session path the POST already
+                carries CSRF; on the bearer path there's no CSRF surface (the
+                token is sent explicitly, not auto-attached), and a valid bearer
+                token is itself proof of the active credential - the same re-auth
+                argument. Narrow with ``transport="session"`` if your policy
+                requires first-password establishment to be browser-only.
             """
             user = principal.user
             if not is_unusable_password(self.repo.get(user, "hashed_password", "")):

@@ -51,6 +51,36 @@ A field declared in the schema but not opted into `register_extra_fields` is dro
 startup warning). CRUDAuth's privileged fields (`is_superuser`, `email_verified`, ...) can
 **never** be opted in; declaring one is logged and ignored.
 
+## Setting columns the server controls
+
+`register_extra_fields` is for fields the *client* sends. For columns the *server* fills,
+especially ones that are `NOT NULL` with no default, or values you derive, use
+`new_user_defaults` (constants) or `new_user_fields` (a callback). Both run wherever CRUDAuth
+creates a user: `/register` **and** OAuth signup.
+
+```python
+# constant values
+auth = CRUDAuth(..., new_user_defaults={"tier_id": FREE_TIER_ID})
+
+# derived values (sync or async; the callback may read the database)
+def new_user_fields(ctx):
+    return {"name": ctx.suggested_name, "tier_id": FREE_TIER_ID}
+
+auth = CRUDAuth(..., new_user_fields=new_user_fields)
+```
+
+The callback gets a [`NewUserContext`](../../api/provisioning.md): `email`, `username`,
+`source` (`"register"` or `"oauth"`), the live `db`, the validated `register_data`, and the
+`oauth` profile, so you can branch on the path or derive from the provider. `ctx.suggested_name`
+is the OAuth display name, with the email local-part as a fallback. Return a dict or a Pydantic
+model.
+
+The difference from `register_extra_fields` is the trust boundary: this is fed a server-built
+context, never the request body, so a client can't set these values. `new_user_defaults` merges
+first, then `new_user_fields`, so a derived value can override a constant. Both are gated like
+the allowlist: a CRUDAuth-owned field (`is_superuser`, `email_verified`, the password, the oauth
+ids, the PK) is dropped and warned, never set.
+
 ## Duplicate emails
 
 Registering with an address that already exists returns the same generic response as a new
