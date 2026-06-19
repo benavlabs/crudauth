@@ -89,6 +89,25 @@ The allowlist is the whole point: adding `locale` to your model doesn't quietly 
 
 To change the request body itself (different validation rules, extra required inputs), pass your own Pydantic model as `register_schema`. The allowlist still applies on top: a field in your schema is persisted only if it's `email`, `username`, or opted into `register_extra_fields`.
 
+## Filling columns the server owns
+
+The columns you added earlier were safe to leave out at signup: `full_name` is nullable, `locale` has a default. Add a *required* column with no default, say `name: Mapped[str]`, and signup breaks: CRUDAuth builds the new row from the fields it knows (email, username, password), and your `NOT NULL` `name` isn't one of them.
+
+`register_extra_fields` doesn't solve this on its own. It lets the *client* send `name`; it doesn't let the *server* set one, and it does nothing for the OAuth path, which has no form at all. For server-owned values, constant or derived, there's a separate seam:
+
+```python
+# a constant for everyone
+auth = CRUDAuth(..., new_user_defaults={"tier_id": FREE})
+
+# or derive it
+def new_user_fields(ctx):
+    return {"name": ctx.suggested_name}
+
+auth = CRUDAuth(..., new_user_fields=new_user_fields)
+```
+
+This runs wherever CRUDAuth creates a user, password and OAuth alike, and it's fed a trusted context (the email, the OAuth profile, the database), never the request body. That's chapter 1's mass-assignment lesson again: the client decides what the client may send, the server decides what the server sets, and the two never blur. A privileged field returned here is dropped, the same way it is at the registration allowlist.
+
 ## Where this leaves you
 
 The model is yours: the mixin supplies the auth columns (or `column_map` points at the ones you have), your own columns ride alongside untouched, and registration can set only what you've explicitly allowed. Auth touches a known, small slice of the row, and nothing else.
