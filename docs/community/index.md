@@ -1,6 +1,6 @@
 # Community
 
-crudauth is open source and pre-1.0. Contributions, bug reports, and questions are all
+CRUDAuth is open source and pre-1.0. Contributions, bug reports, and questions are all
 welcome.
 
 <div class="grid cards" markdown>
@@ -33,7 +33,7 @@ welcome.
 
     ---
 
-    crudauth is MIT licensed.
+    CRUDAuth is MIT licensed.
 
     [License →](license.md)
 

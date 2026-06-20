@@ -30,8 +30,8 @@ best-effort (a failure is logged), but the verify/reset/change flows surface a r
 a 5xx.
 
 <p align="center">
-  <img src="../../assets/diagrams/email-flow-light.png#only-light" alt="Three-step email flow: a request endpoint always returns 200, crudauth signs a single-use token and your EmailSender delivers the link, and the confirm endpoint verifies and consumes the token once" width="100%">
-  <img src="../../assets/diagrams/email-flow-dark.png#only-dark" alt="Three-step email flow: a request endpoint always returns 200, crudauth signs a single-use token and your EmailSender delivers the link, and the confirm endpoint verifies and consumes the token once" width="100%">
+  <img src="../../assets/diagrams/email-flow-light.png#only-light" alt="Three-step email flow: a request endpoint always returns 200, CRUDAuth signs a single-use token and your EmailSender delivers the link, and the confirm endpoint verifies and consumes the token once" width="100%">
+  <img src="../../assets/diagrams/email-flow-dark.png#only-dark" alt="Three-step email flow: a request endpoint always returns 200, CRUDAuth signs a single-use token and your EmailSender delivers the link, and the confirm endpoint verifies and consumes the token once" width="100%">
 </p>
 
 ## The link, and your frontend's job

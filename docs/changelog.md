@@ -1,7 +1,54 @@
 # Changelog
 
-Notable changes to crudauth, newest first. crudauth is pre-1.0, so minor versions may include
+Notable changes to CRUDAuth, newest first. CRUDAuth is pre-1.0, so minor versions may include
 breaking changes; those are called out explicitly.
+
+___
+
+## 0.3.0 - 2026-06-20
+
+Account shapes. CRUDAuth's identity and recovery are now read from your model instead of assumed
+to be email, so an app can log in by username, recover by phone, or hold no email at all, with the
+same flows and the same security. Plus pluggable delivery channels, a server-side provisioning
+seam, and a ten-recipe cookbook.
+
+#### Added
+- **Model-driven identity contract** (`make_auth_identity()` + `IdentityConfig`): the account
+  *shape* is read from the model and the *intent* (login order, recovery factor) is declared in
+  `IdentityConfig`, validated against the model at construction. Username-only accounts (no email)
+  and non-email recovery become configuration, not forks.
+- **Recovery-factor verification:** "verified" now means the contract's recovery factor is proven
+  controlled, with email as the special case. A phone-recovery app verifies and resets over SMS,
+  and `current_user(verified=True)` gates on the recovery factor. The verify and reset request
+  endpoints are shaped to the factor, so a phone app drives them with `{"phone": ...}`.
+- **Pluggable delivery channels** (`DeliveryChannel` port, `channels=[...]`): recovery tokens
+  route over email, SMS, push, or any medium you implement; email is a built-in channel and every
+  channel fires best-effort.
+- **Provisioning seam** (`new_user_fields` / `new_user_defaults`): set app-owned columns on new
+  users from a server-built context, on both `/register` and OAuth signup, gated so a client can't
+  reach a privileged column.
+- A **Cookbook** of ten from-scratch recipes (the three account shapes, OAuth, token APIs,
+  existing-table onboarding, production), an Identity API reference page, and a refreshed
+  architecture page.
+
+#### Changed
+- `current_user(verified=True)` gates on `recovery_verified` (which equals `email_verified` for an
+  email-recovery app) and raises at construction when the contract has no recovery factor.
+- The recovery `verify` / `reset` request bodies are generated for the recovery factor; the
+  change-email endpoints mount only when the model has an `email` column.
+- A non-email recovery factor emits a `{factor}_verified` bookkeeping column (e.g. `phone_verified`)
+  alongside the app-declared factor column.
+
+#### Breaking changes
+- **`AuthHooks.on_after_email_verified` → `on_after_recovery_verified`.** The verification hook is
+  factor-neutral now; `on_after_email_changed` keeps its name (it proves a real email). Apps
+  registering the old hook must rename it.
+- **`EmailFlowService.request_email_verification` / `confirm_email_verification` →
+  `request_recovery_verification` / `confirm_recovery_verification`**, and the verify / reset
+  request methods take a factor `value` instead of `email`. The service is constructed internally,
+  so most apps are unaffected; direct callers must update.
+- **Login resolves against the contract's `login` fields**, replacing the `@`-in-identifier
+  heuristic. The default (email + username) behaves the same.
 
 ___
 

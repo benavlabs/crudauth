@@ -1,6 +1,6 @@
-# Why crudauth?
+# Why CRUDAuth?
 
-crudauth handles authentication for FastAPI: sessions, JWT, OAuth, and email flows, over
+CRUDAuth handles authentication for FastAPI: sessions, JWT, OAuth, and email flows, over
 your own SQLAlchemy user model. This page covers what it does, what it doesn't, and when to
 use something else.
 
@@ -103,9 +103,9 @@ async def welcome(user, *, db, context):
 auth = CRUDAuth(..., hooks=AuthHooks(on_after_register=welcome))
 ```
 
-## What crudauth doesn't do
+## What CRUDAuth doesn't do
 
-crudauth is a focused library, not an identity platform.
+CRUDAuth is a focused library, not an identity platform.
 
 !!! note "Reach for something else when"
 
@@ -121,7 +121,7 @@ crudauth is a focused library, not an identity platform.
     **You only need one "Sign in with Google".** A single OAuth flow with no sessions or
     registration is lighter with `Authlib` directly.
 
-    **You're not on FastAPI and SQLAlchemy.** crudauth is built on both.
+    **You're not on FastAPI and SQLAlchemy.** CRUDAuth is built on both.
 
 ## Adopt it incrementally
 
@@ -136,6 +136,6 @@ Each step is additive, and none of them change how your routes authorize:
 
 <div style="text-align: center; margin-top: 30px;">
     <a href="../#quick-start" class="md-button md-button--primary">
-        Get started with crudauth
+        Get started with CRUDAuth
     </a>
 </div>

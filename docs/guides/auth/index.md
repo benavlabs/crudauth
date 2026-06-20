@@ -61,7 +61,7 @@ code never depends on how the request arrived.
 
 !!! tip "Not sure which to read first?"
 
-    **New to crudauth?** [Protecting routes](protecting-routes.md) covers the one dependency
+    **New to CRUDAuth?** [Protecting routes](protecting-routes.md) covers the one dependency
     you'll use everywhere.
 
     **Browser app?** [Sessions](sessions.md) is the default and needs no configuration.

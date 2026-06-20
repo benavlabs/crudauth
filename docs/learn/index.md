@@ -1,8 +1,8 @@
-# Learn crudauth
+# Learn CRUDAuth
 
 Most auth bugs aren't exotic; they come from wiring together pieces you don't fully
 understand: a cookie here, a token there, a password hash you hope is right. This track takes
-the opposite approach: it builds the mental model first, then assembles a real crudauth setup
+the opposite approach: it builds the mental model first, then assembles a real CRUDAuth setup
 on top of it, so the code you ship is code you actually understand.
 
 It runs in three acts:

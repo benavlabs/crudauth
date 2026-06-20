@@ -35,7 +35,7 @@ auth = CRUDAuth(
 | Method & path | What it does |
 |---|---|
 | `POST /register` | Create an account (`email`, `username`, `password`). |
-| `POST /login` | Log in with `username` (or email) + `password`; sets the cookies. |
+| `POST /login` | Log in with a configured login field (`username` or `email` by default) + `password`; sets the cookies. |
 | `POST /logout` | Terminate the current session and clear the cookies. |
 | `GET /me` | Return the authenticated user's identity. |
 
@@ -44,7 +44,7 @@ routes, see [Protecting routes](protecting-routes.md).
 
 ## How a session works
 
-On a successful `POST /login`, crudauth:
+On a successful `POST /login`, CRUDAuth:
 
 1. Verifies the credentials (with lockout and timing equalization).
 2. Creates a session record in the backend (in-memory or Redis).

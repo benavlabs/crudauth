@@ -5,6 +5,11 @@
 you opt it in. That allowlist is deliberate: adding a column to your model never silently
 becomes settable at signup.
 
+The fields here are the default (email + username) account shape. The shape is configurable, so
+a username-only or other-recovery app registers different fields; see the
+[account-shape recipes](../../cookbook/index.md) and the
+[identity contract](../../api/identity.md).
+
 Registration is part of the base app, so it needs no extra configuration:
 
 ```python

@@ -118,10 +118,26 @@ edit_uri = "edit/main/docs/"
 ]
 
 [[project.nav]]
+"Cookbook" = [
+    { "Overview" = "cookbook/index.md" },
+    { "Email + password" = "cookbook/email-password.md" },
+    { "Username-only accounts" = "cookbook/username-only.md" },
+    { "Phone recovery (SMS)" = "cookbook/phone-recovery.md" },
+    { "Sign in with Google" = "cookbook/sign-in-with-google.md" },
+    { "Email, password, and Google" = "cookbook/email-password-and-google.md" },
+    { "A token API (bearer)" = "cookbook/token-api.md" },
+    { "Web and API in one backend" = "cookbook/web-and-api.md" },
+    { "Server-set fields at signup" = "cookbook/server-set-fields.md" },
+    { "Onboard an existing users table" = "cookbook/existing-users-table.md" },
+    { "Going to production" = "cookbook/going-to-production.md" },
+]
+
+[[project.nav]]
 "API Reference" = [
     { "Overview" = "api/index.md" },
     { "CRUDAuth" = "api/crud-auth.md" },
     { "Principal" = "api/principal.md" },
+    { "Identity" = "api/identity.md" },
     { "Transports" = "api/transports.md" },
     { "OAuth" = "api/oauth.md" },
     { "Email" = "api/email.md" },

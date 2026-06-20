@@ -7,8 +7,8 @@
 
 <p align="center">
   <a href="https://github.com/benavlabs/crudauth">
-    <img src="assets/crudauth-cover-light.png#only-light" alt="crudauth" width="55%">
-    <img src="assets/crudauth-cover-dark.png#only-dark" alt="crudauth" width="55%">
+    <img src="assets/crudauth-cover-light.png#only-light" alt="CRUDAuth" width="55%">
+    <img src="assets/crudauth-cover-dark.png#only-dark" alt="CRUDAuth" width="55%">
   </a>
 </p>
 <p align="center" markdown=1>
@@ -30,7 +30,7 @@
 </p>
 <hr>
 <p align="justify">
-<b>crudauth</b> gives you one <code>CRUDAuth</code> object that wires cookie sessions, JWT bearer tokens, OAuth, and email flows (verify / reset / change) - with CSRF, escalating login lockout, sudo mode, and multi-device session management - over <b>your own</b> SQLAlchemy <code>User</code> model. Sessions and bearer both resolve to the same <code>Principal</code>, so narrowing or adding a transport never changes how you authorize a route, and app policy lives in <b>hooks</b> instead of forked dependency code.
+<b>CRUDAuth</b> gives you one <code>CRUDAuth</code> object that wires cookie sessions, JWT bearer tokens, OAuth, and email flows (verify / reset / change) - with CSRF, escalating login lockout, sudo mode, and multi-device session management - over <b>your own</b> SQLAlchemy <code>User</code> model. Sessions and bearer both resolve to the same <code>Principal</code>, so narrowing or adding a transport never changes how you authorize a route, and app policy lives in <b>hooks</b> instead of forked dependency code.
 </p>
 <hr>
 
@@ -56,7 +56,7 @@
 
 ## Quick Start
 
-### 1. Install crudauth
+### 1. Install CRUDAuth
 
 === "pip"
 
@@ -156,7 +156,7 @@ auth = CRUDAuth(
 
 ## The Benav Labs family
 
-crudauth is part of a family of composable FastAPI building blocks - use whichever you need:
+CRUDAuth is part of a family of composable FastAPI building blocks - use whichever you need:
 
 - **[FastCRUD](https://github.com/benavlabs/fastcrud)** - powerful CRUD methods and automatic endpoint creation for your SQLAlchemy models.
 - **[CRUDAdmin](https://github.com/benavlabs/crudadmin)** - a modern, secure admin interface generated straight from your models.
@@ -165,7 +165,7 @@ crudauth is part of a family of composable FastAPI building blocks - use whichev
 
 ## Build a full SaaS on FastAPI
 
-crudauth handles authentication in **[FastroAI](https://fastro.ai)** - the complete FastAPI SaaS template: auth, Stripe payments (subscriptions, credits, discounts), entitlements, transactional email, an Astro frontend, and PydanticAI agents, wired together and production-ready.
+CRUDAuth handles authentication in **[FastroAI](https://fastro.ai)** - the complete FastAPI SaaS template: auth, Stripe payments (subscriptions, credits, discounts), entitlements, transactional email, an Astro frontend, and PydanticAI agents, wired together and production-ready.
 
 <p align="center">
   <a href="https://fastro.ai">

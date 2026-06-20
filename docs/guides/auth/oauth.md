@@ -1,6 +1,6 @@
 # OAuth
 
-OAuth lets users sign in with Google, GitHub, or a custom provider. crudauth runs the
+OAuth lets users sign in with Google, GitHub, or a custom provider. CRUDAuth runs the
 authorization-code flow, links the result to a user in your database, and establishes a
 session on the callback.
 
@@ -30,8 +30,8 @@ is `{redirect_base_url}/oauth/{provider}/callback`.
 ## The flow
 
 <p align="center">
-  <img src="../../assets/diagrams/oauth-flow-light.png#only-light" alt="The four-step OAuth authorization-code flow: your app redirects out with a state, the provider signs the user in, the callback returns a code and state which crudauth rechecks, then crudauth exchanges the code, links the user, and logs them in" width="100%">
-  <img src="../../assets/diagrams/oauth-flow-dark.png#only-dark" alt="The four-step OAuth authorization-code flow: your app redirects out with a state, the provider signs the user in, the callback returns a code and state which crudauth rechecks, then crudauth exchanges the code, links the user, and logs them in" width="100%">
+  <img src="../../assets/diagrams/oauth-flow-light.png#only-light" alt="The four-step OAuth authorization-code flow: your app redirects out with a state, the provider signs the user in, the callback returns a code and state which CRUDAuth rechecks, then CRUDAuth exchanges the code, links the user, and logs them in" width="100%">
+  <img src="../../assets/diagrams/oauth-flow-dark.png#only-dark" alt="The four-step OAuth authorization-code flow: your app redirects out with a state, the provider signs the user in, the callback returns a code and state which CRUDAuth rechecks, then CRUDAuth exchanges the code, links the user, and logs them in" width="100%">
 </p>
 
 CRUDAuth binds the `state` parameter to the initiating browser via a cookie, so a stolen or

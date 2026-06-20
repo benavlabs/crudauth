@@ -1,6 +1,6 @@
 # Getting started
 
-This is the whole process, once: install crudauth, point it at your user model, mount the
+This is the whole process, once: install CRUDAuth, point it at your user model, mount the
 router, and make your first authenticated request. The guides build on this and only show the
 config specific to each feature.
 

@@ -2,7 +2,7 @@
 
 HTTP has no memory; each request arrives on its own, and the server has no idea it just handled a request from the same person a second ago. That single fact is where all of web authentication comes from - if the server forgets you between requests, then every request has to carry proof of who you are. Everything else (cookies, tokens, sessions) is a different answer to one question: how does that proof travel, and how does the server trust it?
 
-This page is the model CRUDAuth is built on. There's almost no crudauth code here yet; it's the vocabulary the rest of the documentation uses.
+This page is the model CRUDAuth is built on. There's almost no CRUDAuth code here yet; it's the vocabulary the rest of the documentation uses.
 
 **Authentication** answers "who are you." **Authorization** answers "what are you allowed to do." A login proves identity, which is authentication; checking that the logged-in user is an admin before letting them delete a record is authorization. They're separate steps, and CRUDAuth does both: a transport authenticates the request, and the gates on a route authorize it. Keeping them distinct in your head makes everything after this clearer.
 

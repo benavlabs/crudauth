@@ -1,10 +1,10 @@
 # API Reference
 
-Every public symbol in crudauth, generated from the source docstrings. Unless a page notes
+Every public symbol in CRUDAuth, generated from the source docstrings. Unless a page notes
 otherwise, each is importable straight from the top-level `crudauth` package.
 
 !!! tip "New here?"
-    Start with [Why crudauth?](../why-crudauth.md) and the [Quick Start](../#quick-start),
+    Start with [Why CRUDAuth?](../why-crudauth.md) and the [Quick Start](../#quick-start),
     then come back for the details.
 
 ## Core

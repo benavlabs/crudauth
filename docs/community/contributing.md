@@ -5,7 +5,7 @@ needs to pass, the conventions the codebase follows, and how a release ships.
 
 ## Set up
 
-crudauth uses [uv](https://docs.astral.sh/uv/). Fork and clone the repo, then:
+CRUDAuth uses [uv](https://docs.astral.sh/uv/). Fork and clone the repo, then:
 
 ```bash
 uv sync --all-extras --dev
