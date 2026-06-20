@@ -272,3 +272,38 @@ async def test_phone_verify_requires_the_delivered_token() -> None:
                     db, token
                 )  # replay rejected
             assert repo.recovery_verified(await repo.get_by_field(db, "phone", "777")) is True
+
+
+async def test_phone_verify_and_reset_work_over_http() -> None:
+    # the closed seam: the built-in request endpoints accept the recovery factor
+    # (phone) over HTTP, not an email, so phone recovery is end-to-end over HTTP.
+    async with _phone_app() as (auth, client, maker, channel):
+        async with maker() as db:
+            await auth.repo.create(
+                db, {"username": "neo", "phone": "555", "hashed_password": get_password_hash("pw")}
+            )
+
+        r = await client.post("/email/verify-request", json={"phone": "555"})
+        assert r.status_code == 200
+        assert channel.intents[-1].recipient == "555"
+        assert channel.intents[-1].kind == "verify_recovery"
+
+        r = await client.post("/password/reset-request", json={"phone": "555"})
+        assert r.status_code == 200
+        assert channel.intents[-1].recipient == "555"
+        assert channel.intents[-1].kind == "reset_password"
+
+
+async def test_phone_request_body_is_phone_shaped_not_email() -> None:
+    # the request body is shaped to the factor: a phone app's verify-request wants
+    # "phone", so posting "email" is a 422 (missing required field).
+    async with _phone_app() as (auth, client, _maker, _channel):
+        r = await client.post("/email/verify-request", json={"email": "a@x.com"})
+        assert r.status_code == 422
+
+
+async def test_email_less_phone_app_mounts_no_change_email() -> None:
+    # change-email proves a real address; an email-less phone app doesn't mount it.
+    async with _phone_app() as (auth, client, _maker, _channel):
+        r = await client.post("/email/change-request", json={"new_email": "a@x.com", "password": "pw"})
+        assert r.status_code == 404
