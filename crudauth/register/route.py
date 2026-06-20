@@ -180,7 +180,7 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
 
         if email_on and auth.identity.recovery is not None:
             await _send_best_effort(
-                auth._email_service.request_email_verification(
+                auth._email_service.request_recovery_verification(
                     db, auth.repo.get(user, auth.identity.recovery)
                 )
             )

@@ -247,7 +247,7 @@ async def test_intent_shapes_per_kind(sessionmaker, UserModel) -> None:
     )
     async with sessionmaker() as db:
         user = await repo.get_by_email(db, "u@x.com")
-        await svc.request_email_verification(db, "u@x.com")
+        await svc.request_recovery_verification(db, "u@x.com")
         await svc.request_password_reset(db, "u@x.com")
         await svc.request_email_change(db, user, "new@x.com", "pw")
         await svc.notify_existing_account("u@x.com")

@@ -216,14 +216,14 @@ async def test_phone_verify_delivers_to_phone_and_gates_on_it() -> None:
         assert (await client.get("/secret")).status_code == 403  # not verified yet
 
         async with maker() as db:
-            await auth._email_service.request_email_verification(db, "555")
+            await auth._email_service.request_recovery_verification(db, "555")
         intent = channel.intents[-1]
         assert intent.recipient == "555"  # delivered to the PHONE, not an email
         # factor-neutral kind for a non-email factor (not the email-named "verify_email")
         assert intent.kind == "verify_recovery" and intent.token is not None
 
         async with maker() as db:
-            await auth._email_service.confirm_email_verification(db, intent.token)
+            await auth._email_service.confirm_recovery_verification(db, intent.token)
         assert (await client.get("/secret")).status_code == 200  # now verified
 
 
@@ -236,20 +236,22 @@ async def test_phone_verify_requires_the_delivered_token() -> None:
                 {"username": "trin", "phone": "777", "hashed_password": get_password_hash("pw")},
             )
         async with maker() as db:
-            await auth._email_service.request_email_verification(db, "777")
+            await auth._email_service.request_recovery_verification(db, "777")
         token = channel.intents[-1].token
         assert token is not None
 
         async with maker() as db:
             with pytest.raises(BadRequestException):
-                await auth._email_service.confirm_email_verification(db, "not-a-token")
+                await auth._email_service.confirm_recovery_verification(db, "not-a-token")
             assert repo.recovery_verified(await repo.get_by_field(db, "phone", "777")) is False
 
         async with maker() as db:
-            await auth._email_service.confirm_email_verification(db, token)
+            await auth._email_service.confirm_recovery_verification(db, token)
             assert repo.recovery_verified(await repo.get_by_field(db, "phone", "777")) is True
 
         async with maker() as db:
             with pytest.raises(BadRequestException):
-                await auth._email_service.confirm_email_verification(db, token)  # replay rejected
+                await auth._email_service.confirm_recovery_verification(
+                    db, token
+                )  # replay rejected
             assert repo.recovery_verified(await repo.get_by_field(db, "phone", "777")) is True

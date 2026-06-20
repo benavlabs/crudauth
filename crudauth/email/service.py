@@ -206,7 +206,7 @@ class EmailFlowService:
         )
 
     # --- recovery-factor verification ----------------------------------------
-    async def request_email_verification(self, db: AsyncSession, value: str) -> None:
+    async def request_recovery_verification(self, db: AsyncSession, value: str) -> None:
         """Send a verification token for the contract's recovery factor.
 
         Idempotent; never reveals account existence. The user is looked up by the
@@ -239,7 +239,7 @@ class EmailFlowService:
             db,
         )
 
-    async def confirm_email_verification(self, db: AsyncSession, token: str) -> Any:
+    async def confirm_recovery_verification(self, db: AsyncSession, token: str) -> Any:
         """Verify the signed token and mark the user's email verified (one-time-use).
 
         Args:
