@@ -41,8 +41,10 @@ class DeliveryIntent:
     copy. Read what you need off ``recipient`` / ``user``; do not assume email.
 
     Attributes:
-        kind: Which message this is (``verify_email`` / ``reset_password`` /
-            ``change_email`` / ``existing_account``).
+        kind: Which message this is (``verify_email`` for an email-recovery verify,
+            ``verify_recovery`` for any other factor, ``reset_password`` /
+            ``change_email`` / ``existing_account``). A non-email channel branches on
+            this to pick its own medium-appropriate copy.
         token: The signed token, or ``None`` for ``existing_account`` (a notice
             with no action).
         user: The logical-contract user dict (``repo.to_dict``); empty for the
@@ -102,6 +104,7 @@ class DeliveryChannel(ABC):
 # kind -> (subject, EmailConfig path attribute, body prefix) for the link kinds.
 _EMAIL_SPECS: dict[str, tuple[str, str, str]] = {
     "verify_email": (SUBJECT_VERIFY, "verify_path", "Verify your email:"),
+    "verify_recovery": (SUBJECT_VERIFY, "verify_path", "Verify your email:"),
     "reset_password": (SUBJECT_RESET, "reset_path", "Reset your password:"),
     "change_email": (SUBJECT_CHANGE, "change_path", "Confirm your new email:"),
 }

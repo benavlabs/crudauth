@@ -9,11 +9,19 @@ VERIFY = "verify_email"
 RESET = "reset_password"
 CHANGE = "change_email"
 
-# The message kinds crudauth asks the adapter to deliver. ``existing_account`` is
-# a security notice ("someone tried to register with your email"), distinct from
-# the cheery ``welcome``. (The first three mirror VERIFY/RESET/CHANGE above;
-# Literal members must be string literals, so they're spelled out here.)
-EmailKind = Literal["verify_email", "reset_password", "change_email", "welcome", "existing_account"]
+# The message kinds crudauth asks the adapter to deliver. ``verify_email`` is the
+# recovery-factor verification for an email-recovery app; ``verify_recovery`` is the
+# same for any other factor (so a non-email channel isn't handed an "email"-named
+# kind). ``existing_account`` is a security notice ("someone tried to register with
+# your email"), distinct from the cheery ``welcome``.
+EmailKind = Literal[
+    "verify_email",
+    "verify_recovery",
+    "reset_password",
+    "change_email",
+    "welcome",
+    "existing_account",
+]
 EMAIL_KINDS: tuple[EmailKind, ...] = get_args(EmailKind)
 
 # Per-target-email throttle actions -> the rate_limits keys they borrow.

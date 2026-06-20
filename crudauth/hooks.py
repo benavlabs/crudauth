@@ -53,7 +53,7 @@ class AuthHooks:
     on_after_register: Hook | None = None
     on_after_login: Hook | None = None
     on_after_logout: Hook | None = None
-    on_after_email_verified: Hook | None = None
+    on_after_recovery_verified: Hook | None = None
     on_after_password_reset: Hook | None = None
     on_after_email_changed: Hook | None = None
     on_after_sudo: Hook | None = None
@@ -70,9 +70,11 @@ class AuthHooks:
         if self.on_after_logout is not None:
             await _maybe_await(self.on_after_logout(user, request=request, context=context))
 
-    async def run_after_email_verified(self, user: dict, *, db: Any, context: HookContext) -> None:
-        if self.on_after_email_verified is not None:
-            await _maybe_await(self.on_after_email_verified(user, db=db, context=context))
+    async def run_after_recovery_verified(
+        self, user: dict, *, db: Any, context: HookContext
+    ) -> None:
+        if self.on_after_recovery_verified is not None:
+            await _maybe_await(self.on_after_recovery_verified(user, db=db, context=context))
 
     async def run_after_password_reset(self, user: dict, *, db: Any, context: HookContext) -> None:
         if self.on_after_password_reset is not None:

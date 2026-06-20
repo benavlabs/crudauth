@@ -125,7 +125,7 @@ know:
 
 ## Hooks
 
-`on_after_email_verified`, `on_after_password_reset`, and `on_after_email_changed` fire after
+`on_after_recovery_verified`, `on_after_password_reset`, and `on_after_email_changed` fire after
 the matching confirm, so you can grant access, send a notice, or write an audit record.
 
 ## Security notes

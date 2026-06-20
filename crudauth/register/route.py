@@ -178,9 +178,11 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
             ),
         )
 
-        if email_on and auth.repo.has("email"):
+        if email_on and auth.identity.recovery is not None:
             await _send_best_effort(
-                auth._email_service.request_email_verification(db, auth.repo.get(user, "email"))
+                auth._email_service.request_recovery_verification(
+                    db, auth.repo.get(user, auth.identity.recovery)
+                )
             )
             response.status_code = status.HTTP_202_ACCEPTED
             return {"detail": _ENROLLED_DETAIL}

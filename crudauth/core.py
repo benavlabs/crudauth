@@ -17,7 +17,6 @@ from fastapi import APIRouter, Request
 from .constants import DEFAULT_ALGORITHM
 from .principal import Principal
 
-# Valid SameSite cookie values, matching Starlette's set_cookie signature.
 SameSite = Literal["lax", "strict", "none"]
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -127,6 +126,7 @@ class AuthContext:
             user=user,
             is_superuser=self.repo.is_superuser(user) if user is not None else False,
             email_verified=self.repo.email_verified(user) if user is not None else False,
+            recovery_verified=self.repo.recovery_verified(user) if user is not None else False,
             metadata=metadata or {},
         )
 

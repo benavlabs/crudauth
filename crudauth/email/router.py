@@ -56,13 +56,13 @@ def build_email_router(*, auth: Any, service: EmailFlowService) -> APIRouter:
     )
     async def request_verification(body: _EmailIn, db: Annotated[Any, Depends(db_dep)]):
         """Send an email-verification link. Always returns success (no enumeration)."""
-        await service.request_email_verification(db, body.email)
+        await service.request_recovery_verification(db, body.email)
         return {"detail": "If an account exists, a verification email has been sent."}
 
     @router.post("/email/verify-confirm")
     async def confirm_verification(body: _TokenIn, db: Annotated[Any, Depends(db_dep)]):
         """Confirm a verification token and mark the email verified."""
-        await service.confirm_email_verification(db, body.token)
+        await service.confirm_recovery_verification(db, body.token)
         return {"detail": "Email verified successfully."}
 
     @router.post(

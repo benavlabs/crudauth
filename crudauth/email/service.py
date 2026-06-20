@@ -205,13 +205,21 @@ class EmailFlowService:
             None,
         )
 
-    # --- email verification --------------------------------------------------
-    async def request_email_verification(self, db: AsyncSession, email: str) -> None:
-        """Send a verification link. Idempotent; never reveals account existence."""
-        if not await self._email_within_limit(VERIFY_ACTION, email):
+    # --- recovery-factor verification ----------------------------------------
+    async def request_recovery_verification(self, db: AsyncSession, value: str) -> None:
+        """Send a verification token for the contract's recovery factor.
+
+        Idempotent; never reveals account existence. The user is looked up by the
+        recovery factor (email for email recovery, phone for phone recovery) and
+        the token is delivered to that factor's value over the configured channel.
+        """
+        factor = self.repo.recovery
+        if factor is None:
             return
-        user = await self.repo.get_by_email(db, email)
-        if user is None or self.repo.email_verified(user):
+        if not await self._email_within_limit(VERIFY_ACTION, value):
+            return
+        user = await self.repo.get_by_field(db, factor, value)
+        if user is None or self.repo.recovery_verified(user):
             return
         token = create_signed_token(
             self.secret_key,
@@ -222,16 +230,16 @@ class EmailFlowService:
         )
         await self._deliver(
             DeliveryIntent(
-                kind="verify_email",
+                kind="verify_email" if factor == "email" else "verify_recovery",
                 token=token,
                 user=self.repo.to_dict(user),
-                recipient=email,
+                recipient=self.repo.get(user, factor),
                 expires_in=self.verify_ttl_hours * SECONDS_PER_HOUR,
             ),
             db,
         )
 
-    async def confirm_email_verification(self, db: AsyncSession, token: str) -> Any:
+    async def confirm_recovery_verification(self, db: AsyncSession, token: str) -> Any:
         """Verify the signed token and mark the user's email verified (one-time-use).
 
         Args:
@@ -252,19 +260,23 @@ class EmailFlowService:
         user = await self.repo.get_by_id(db, sub)
         if user is None:
             raise BadRequestException("Invalid or expired token")
-        if not self.repo.email_verified(user):
-            await self.repo.update(db, user, {"email_verified": True})
-            await self.hooks.run_after_email_verified(
+        if not self.repo.recovery_verified(user):
+            await self.repo.mark_recovery_verified(db, user)
+            await self.hooks.run_after_recovery_verified(
                 self.repo.to_dict(user), db=db, context=HookContext()
             )
         return user
 
     # --- password reset ------------------------------------------------------
-    async def request_password_reset(self, db: AsyncSession, email: str) -> None:
-        """Send a reset link. Idempotent; never reveals account existence."""
-        if not await self._email_within_limit(RESET_ACTION, email):
+    async def request_password_reset(self, db: AsyncSession, value: str) -> None:
+        """Send a reset token over the configured channel. Idempotent; never reveals
+        account existence. Looked up by, and delivered to, the recovery factor."""
+        factor = self.repo.recovery
+        if factor is None:
             return
-        user = await self.repo.get_by_email(db, email)
+        if not await self._email_within_limit(RESET_ACTION, value):
+            return
+        user = await self.repo.get_by_field(db, factor, value)
         if user is None:
             return
         token = create_signed_token(
@@ -279,7 +291,7 @@ class EmailFlowService:
                 kind="reset_password",
                 token=token,
                 user=self.repo.to_dict(user),
-                recipient=email,
+                recipient=self.repo.get(user, factor),
                 expires_in=self.reset_ttl_hours * SECONDS_PER_HOUR,
             ),
             db,

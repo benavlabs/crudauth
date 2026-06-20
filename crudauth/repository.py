@@ -42,6 +42,7 @@ class UserRepository:
         column_map: dict[str, str] | None = None,
         register_extra_fields: Iterable[str] | None = None,
         login_fields: Iterable[str] | None = None,
+        recovery: str | None = "email",
     ):
         self.model = model
         self.column_map = column_map or {}
@@ -49,7 +50,18 @@ class UserRepository:
         self.login_fields = (
             list(login_fields) if login_fields is not None else ["email", "username"]
         )
+        self.recovery = recovery
         self._warned_provisioning_keys: set[str] = set()
+
+    def _recovery_verified_col(self) -> str | None:
+        """The column backing the recovery-factor verified flag, or ``None``.
+
+        Email recovery reuses the always-present ``email_verified``; any other
+        factor uses ``{factor}_verified``. ``recovery=None`` has no such column.
+        """
+        if self.recovery is None:
+            return None
+        return "email_verified" if self.recovery == "email" else f"{self.recovery}_verified"
 
     # --- contract translation ------------------------------------------------
     def col(self, logical: str) -> str:
@@ -200,8 +212,16 @@ class UserRepository:
         ``column_map`` that renames ``is_superuser`` to ``is_admin`` plus a
         register schema declaring ``is_admin`` would otherwise slip a gated
         field past a logical-only gate.
+
+        The recovery-factor verified column (e.g. ``phone_verified``) is gated
+        too - it must be as unsettable at signup as ``email_verified`` always was,
+        since "verified" may only be set by returning the delivered token.
         """
-        return set(REGISTRATION_GATED_FIELDS) | {self.col(g) for g in REGISTRATION_GATED_FIELDS}
+        gated = set(REGISTRATION_GATED_FIELDS) | {self.col(g) for g in REGISTRATION_GATED_FIELDS}
+        rv = self._recovery_verified_col()
+        if rv is not None:
+            gated.add(rv)
+        return gated
 
     def _allowed_register_names(self) -> set[str]:
         """Names registration may keep: the base allowlist plus opted-in extras,
@@ -247,8 +267,14 @@ class UserRepository:
         return {k: v for k, v in data.items() if k in allowed and k not in gated}
 
     def _contract_names(self) -> set[str]:
-        """Every crudauth logical field, by logical AND mapped column name."""
-        return set(LOGICAL_FIELDS) | {self.col(f) for f in LOGICAL_FIELDS}
+        """Every crudauth logical field, by logical AND mapped column name, plus the
+        recovery-factor verified column (so a ``new_user_fields`` callback can't set
+        ``{factor}_verified`` any more than it can set ``email_verified``)."""
+        names = set(LOGICAL_FIELDS) | {self.col(f) for f in LOGICAL_FIELDS}
+        rv = self._recovery_verified_col()
+        if rv is not None:
+            names.add(rv)
+        return names
 
     def filter_provisioning_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Keep only app columns from a ``new_user_fields`` callback.
@@ -331,6 +357,25 @@ class UserRepository:
 
     def email_verified(self, user: Any) -> bool:
         return bool(self.get(user, "email_verified", False))
+
+    def recovery_verified(self, user: Any) -> bool:
+        """Whether the contract's recovery factor is proven controlled.
+
+        Email recovery reads ``email_verified``; another factor reads
+        ``{factor}_verified``; ``recovery=None`` is never verified. This is the
+        general meaning of "verified" - email is the special case, not the concept.
+        """
+        col = self._recovery_verified_col()
+        if col is None or not self.has(col):
+            return False
+        return bool(self.get(user, col, False))
+
+    async def mark_recovery_verified(self, db: AsyncSession, user: Any) -> None:
+        """Set the contract's recovery-factor verified flag (the verify-flow write)."""
+        col = self._recovery_verified_col()
+        if col is None:
+            return
+        await self.update(db, user, {col: True})
 
     def is_active(self, user: Any) -> bool:
         if not self.has("is_active"):

@@ -24,7 +24,7 @@ your hooks don't couple to the model.
 | `on_after_register` | an account is created | `user, db, context` |
 | `on_after_login` | a successful login | `user, request, context` |
 | `on_after_logout` | a logout | `user, request, context` |
-| `on_after_email_verified` | email verification confirm | `user, db, context` |
+| `on_after_recovery_verified` | recovery-factor verification confirm | `user, db, context` |
 | `on_after_password_reset` | password reset confirm | `user, db, context` |
 | `on_after_email_changed` | email change confirm | `user, db, context` |
 | `on_after_sudo` | a sudo elevation | `user, request, context` |

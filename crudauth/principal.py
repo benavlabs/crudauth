@@ -25,7 +25,14 @@ class Principal:
         user: The resolved user row (your ``User`` ORM instance), or ``None`` if
             a transport chose not to resolve it.
         is_superuser: Whether the user holds the superuser flag.
-        email_verified: Whether the user's email is verified.
+        email_verified: The email-specific verified value. Do NOT gate on this -
+            it is ``False`` on a non-email-recovery account (there is no email), so
+            ``check=lambda p: p.email_verified`` silently always-denies a phone app.
+            For gating use ``current_user(verified=True)`` / ``recovery_verified``;
+            ``email_verified`` equals ``recovery_verified`` only when recovery is email.
+        recovery_verified: Whether the contract's recovery factor is proven
+            controlled. This is what ``current_user(verified=True)`` gates on -
+            email is the special case, an arbitrary factor (e.g. phone) the general.
 
     Example:
         ```python
@@ -41,6 +48,7 @@ class Principal:
     user: Any = None
     is_superuser: bool = False
     email_verified: bool = False
+    recovery_verified: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def has_scopes(self, required: list[str] | tuple[str, ...]) -> bool:

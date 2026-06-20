@@ -42,9 +42,12 @@ def make_auth_identity(
         identifiers: Logical fields a user may log in with. Each becomes a
             ``NOT NULL`` unique column. ``email`` here makes the email column
             required.
-        recovery: The single field recovery (verify/reset/change) is delivered
-            against, or ``None`` for an account shape with no recovery. ``"email"``
-            (and not an identifier) makes the email column nullable but unique.
+        recovery: The single field recovery (verify/reset) is delivered against,
+            or ``None`` for an account shape with no recovery. ``"email"`` (and not
+            an identifier) makes the email column nullable but unique. A non-email
+            factor emits a ``{factor}_verified`` bookkeeping flag (e.g.
+            ``phone_verified``); you still declare the factor column itself (e.g.
+            ``phone``) with your own constraints, the same way you would any column.
         oauth: Emit the oauth-linkage columns (``oauth_provider`` / ``google_id`` /
             ``github_id`` / timestamps). Required for OAuth login.
 
@@ -91,6 +94,9 @@ def make_auth_identity(
     add("is_superuser", Mapped[bool], mapped_column(default=False))
     add("email_verified", Mapped[bool], mapped_column(default=False))
     add("token_version", Mapped[int], mapped_column(default=0))
+
+    if recovery is not None and recovery != "email":
+        add(f"{recovery}_verified", Mapped[bool], mapped_column(default=False))
 
     if oauth:
         add("oauth_provider", Mapped[str | None], mapped_column(String(32), default=None))

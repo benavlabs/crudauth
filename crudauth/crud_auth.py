@@ -205,7 +205,11 @@ class CRUDAuth:
         self.session = session
         self.identity = identity or IdentityConfig()
         self.repo = UserRepository(
-            user_model, column_map, register_extra_fields, login_fields=self.identity.login
+            user_model,
+            column_map,
+            register_extra_fields,
+            login_fields=self.identity.login,
+            recovery=self.identity.recovery,
         )
         self._validate_identity(oauth=oauth, email=email)
         self.new_user_fields = new_user_fields
@@ -552,10 +556,10 @@ class CRUDAuth:
                 ...
             ```
         """
-        if verified and not self.repo.has("email"):
+        if verified and self.identity.recovery is None:
             raise ValueError(
-                "current_user(verified=True) gates on email_verified, which requires an "
-                "email column on the user model. (PR-1 placeholder; recovery_verified is PR 2.)"
+                "current_user(verified=True) requires a recovery factor (identity.recovery); "
+                "an account shape with no recovery has nothing to prove control of."
             )
         selected = self._select_transports(transport)
         required_scopes = list(scopes or [])
@@ -572,8 +576,8 @@ class CRUDAuth:
 
             if superuser and not principal.is_superuser:
                 raise ForbiddenException("Insufficient privileges")
-            if verified and not principal.email_verified:
-                raise ForbiddenException("Email not verified")
+            if verified and not principal.recovery_verified:
+                raise ForbiddenException("Recovery factor not verified")
             if required_scopes and not principal.has_scopes(required_scopes):
                 raise ForbiddenException("Insufficient scope")
             if check is not None:
