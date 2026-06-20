@@ -39,6 +39,7 @@ from .exceptions import (
     UnauthorizedException,
 )
 from .hooks import AuthHooks
+from .identity import IdentityConfig
 from .oauth import OAuthAccountService, OAuthProviderFactory
 from .oauth.router import build_oauth_router
 from .principal import Principal
@@ -99,6 +100,7 @@ class CRUDAuth:
         SECRET_KEY: str,
         transports: Sequence[Transport] | None = None,
         column_map: dict[str, str] | None = None,
+        identity: IdentityConfig | None = None,
         oauth: dict[str, Any] | None = None,
         email: Any = None,
         channels: list[DeliveryChannel] | None = None,
@@ -201,7 +203,11 @@ class CRUDAuth:
         if not SECRET_KEY:
             raise ValueError("SECRET_KEY is required")
         self.session = session
-        self.repo = UserRepository(user_model, column_map, register_extra_fields)
+        self.identity = identity or IdentityConfig()
+        self.repo = UserRepository(
+            user_model, column_map, register_extra_fields, login_fields=self.identity.login
+        )
+        self._validate_identity(oauth=oauth, email=email)
         self.new_user_fields = new_user_fields
         self._new_user_defaults = self.repo.filter_provisioning_data(new_user_defaults or {})
         self.hooks = hooks or AuthHooks()
@@ -235,7 +241,7 @@ class CRUDAuth:
 
         self._email_service: EmailFlowService | None = None
         self._email_token_store: AbstractSessionStorage[Any] | None = None
-        if email is not None or channels:
+        if self.identity.recovery is not None and (email is not None or channels):
             self._build_email(email, channels, algorithm)
 
         self._oauth_router: APIRouter | None = None
@@ -275,6 +281,34 @@ class CRUDAuth:
             on_login_success=st.on_login_success if st else "clear_all",
             fail_open=False,
         )
+
+    def _validate_identity(self, *, oauth: dict[str, Any] | None, email: Any) -> None:
+        """Check the identity contract against the model, fail-closed at construction.
+
+        The model owns the shape; this asserts the config agrees with it, so a
+        login field that isn't a unique column, a non-unique recovery field, OAuth
+        without an email login, or an email flow on a model with no email column
+        all raise here rather than splitting into a silent second source of truth.
+        """
+        for login_field in self.identity.login:
+            if not self.repo.is_unique_column(login_field):
+                raise ValueError(
+                    f"identity.login field '{login_field}' is not a unique column on the user "
+                    "model; every login field must be a single-field unique column."
+                )
+        recovery = self.identity.recovery
+        if recovery is not None and not self.repo.is_unique_column(recovery):
+            raise ValueError(
+                f"identity.recovery field '{recovery}' is not a unique column on the user "
+                "model; the recovery field must be a single-field unique column."
+            )
+        if oauth and "email" not in self.identity.login:
+            raise ValueError(
+                "OAuth requires 'email' in identity.login - OAuth links and creates accounts "
+                "by email, so an email-less contract cannot enable OAuth."
+            )
+        if email is not None and not self.repo.has("email"):
+            raise ValueError("email=EmailConfig(...) requires an 'email' column on the user model.")
 
     def _warn_on_register_extra_fields(self, extra: set[str] | None) -> None:
         """Warn when ``register_extra_fields`` tries to opt in a privileged field.
@@ -518,6 +552,11 @@ class CRUDAuth:
                 ...
             ```
         """
+        if verified and not self.repo.has("email"):
+            raise ValueError(
+                "current_user(verified=True) gates on email_verified, which requires an "
+                "email column on the user model. (PR-1 placeholder; recovery_verified is PR 2.)"
+            )
         selected = self._select_transports(transport)
         required_scopes = list(scopes or [])
 

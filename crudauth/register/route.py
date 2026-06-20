@@ -87,12 +87,12 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
         """
         ip = get_client_ip(request, auth.runtime.trusted_proxy_hops)
         email_on = auth._email_service is not None
+        login_fields = auth.identity.login
         data = cast(BaseModel, body).model_dump()
         password = data.pop("password")
         submitted = dict(data)
         data = auth.repo.filter_registration_data(data)
-        email = data.pop("email")
-        username = data.pop("username")
+        login_values = {f: data.pop(f) for f in login_fields}
 
         async def _send_best_effort(coro: Awaitable[Any]) -> None:
             """Dispatch a registration email without letting a send failure fail
@@ -117,23 +117,33 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
             race-recovery so a concurrent duplicate yields the same clean result
             (202 when email is configured, else a duplicate error) instead of a
             500, and non-enumeration is preserved.
-            """
-            if await auth.repo.get_by_email(db, email) is not None:
-                if email_on:
-                    await _send_best_effort(auth._email_service.notify_existing_account(email))
-                    response.status_code = status.HTTP_202_ACCEPTED
-                    return {"detail": _ENROLLED_DETAIL}
-                raise DuplicateValueException("Email already registered")
-            raise DuplicateValueException("Username already taken")
 
-        if await auth.repo.get_by_email(db, email) is not None or await auth.repo.username_exists(
-            db, username
-        ):
-            return await _on_existing()
+            Note:
+                The trailing "Account already exists" raise is reached only if a
+                collision the caller detected has since vanished (the colliding row
+                was deleted between detection and this re-query) - a rare race, not
+                dead code.
+            """
+            for login_field in login_fields:
+                if await auth.repo.get_by_field(db, login_field, login_values[login_field]) is None:
+                    continue
+                if login_field == "email":
+                    if email_on:
+                        await _send_best_effort(
+                            auth._email_service.notify_existing_account(login_values["email"])
+                        )
+                        response.status_code = status.HTTP_202_ACCEPTED
+                        return {"detail": _ENROLLED_DETAIL}
+                    raise DuplicateValueException("Email already registered")
+                raise DuplicateValueException(f"{login_field.capitalize()} already taken")
+            raise DuplicateValueException("Account already exists")
+
+        for login_field in login_fields:
+            if await auth.repo.get_by_field(db, login_field, login_values[login_field]) is not None:
+                return await _on_existing()
 
         create_data: dict[str, Any] = {
-            "email": email,
-            "username": username,
+            **login_values,
             "hashed_password": get_password_hash(password),
         }
         create_data.update(data)
@@ -142,8 +152,8 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
             await resolve_new_user_fields(
                 auth.new_user_fields,
                 NewUserContext(
-                    email=email,
-                    username=username,
+                    email=login_values.get("email", ""),
+                    username=login_values.get("username", ""),
                     source="register",
                     db=db,
                     register_data=submitted,
@@ -168,8 +178,10 @@ def build_register_route(auth: Any, schema: type[BaseModel] | None) -> APIRouter
             ),
         )
 
-        if email_on:
-            await _send_best_effort(auth._email_service.request_email_verification(db, email))
+        if email_on and auth.repo.has("email"):
+            await _send_best_effort(
+                auth._email_service.request_email_verification(db, auth.repo.get(user, "email"))
+            )
             response.status_code = status.HTTP_202_ACCEPTED
             return {"detail": _ENROLLED_DETAIL}
         return {

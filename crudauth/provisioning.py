@@ -63,11 +63,13 @@ class NewUserContext:
 
     @property
     def suggested_name(self) -> str:
-        """A display name to default to: the OAuth name if present, else the
-        email local-part."""
+        """A display name to default to: the OAuth name, else the email local-part,
+        else the username - so it stays useful across email and email-less shapes."""
         if self.oauth is not None and self.oauth.name:
             return self.oauth.name
-        return self.email.split("@")[0]
+        if self.email:
+            return self.email.split("@")[0]
+        return self.username
 
 
 NewUserFields = Callable[

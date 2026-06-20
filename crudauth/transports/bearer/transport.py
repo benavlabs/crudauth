@@ -204,7 +204,7 @@ class BearerTransport(Transport):
                         "Too many login attempts. Try again later.", retry_after=retry_after
                     )
 
-            user = await runtime.repo.get_by_identifier(db, form_data.username)
+            user = await runtime.repo.resolve_login(db, form_data.username)
             if user is None:
                 dummy_verify_password(form_data.password)
                 raise UnauthorizedException("Incorrect username or password")

@@ -12,7 +12,7 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import UniqueConstraint, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .constants import (
@@ -41,10 +41,14 @@ class UserRepository:
         model: type[Any],
         column_map: dict[str, str] | None = None,
         register_extra_fields: Iterable[str] | None = None,
+        login_fields: Iterable[str] | None = None,
     ):
         self.model = model
         self.column_map = column_map or {}
         self.register_extra_fields = frozenset(register_extra_fields or ())
+        self.login_fields = (
+            list(login_fields) if login_fields is not None else ["email", "username"]
+        )
         self._warned_provisioning_keys: set[str] = set()
 
     # --- contract translation ------------------------------------------------
@@ -55,6 +59,36 @@ class UserRepository:
     def has(self, logical: str) -> bool:
         """Whether the model actually has the column for ``logical``."""
         return hasattr(self.model, self.col(logical))
+
+    def is_unique_column(self, logical: str) -> bool:
+        """Whether the resolved column for ``logical`` is single-field unique.
+
+        Detects column-level ``unique=True``, a single-column ``UniqueConstraint``,
+        and a single-column unique ``Index`` - all through ``column_map`` (the
+        resolved column name). Composite uniqueness does NOT count: a multi-column
+        unique key doesn't make one field a safe first-match-wins login key, so a
+        composite-only field is treated as non-unique (and the construction check
+        raises for it).
+        """
+        actual = self.col(logical)
+        table = self.model.__table__
+        if actual not in table.columns:
+            return False
+        column = table.columns[actual]
+        if column.unique:
+            return True
+        name = column.name
+        for constraint in table.constraints:
+            if (
+                isinstance(constraint, UniqueConstraint)
+                and len(constraint.columns) == 1
+                and name in constraint.columns.keys()
+            ):
+                return True
+        for index in table.indexes:
+            if index.unique and len(index.columns) == 1 and name in index.columns.keys():
+                return True
+        return False
 
     def get(self, user: Any, logical: str, default: Any = None) -> Any:
         """Read a logical field off ``user``, or ``default`` if the column is absent."""
@@ -105,23 +139,37 @@ class UserRepository:
         result = await db.execute(select(self.model).where(self._attr("id") == coerced))
         return result.scalar_one_or_none()
 
+    async def get_by_field(self, db: AsyncSession, logical: str, value: Any) -> Any | None:
+        """Fetch the user whose ``logical`` field equals ``value``, or ``None``.
+
+        Email is canonicalized before matching (the column is stored canonical);
+        every other field matches as-is.
+        """
+        if logical == "email" and isinstance(value, str):
+            value = canonical_email(value)
+        result = await db.execute(select(self.model).where(self._attr(logical) == value))
+        return result.scalar_one_or_none()
+
     async def get_by_email(self, db: AsyncSession, email: str) -> Any | None:
         """Fetch the user by (canonicalized) email, or ``None``."""
-        result = await db.execute(
-            select(self.model).where(self._attr("email") == canonical_email(email))
-        )
-        return result.scalar_one_or_none()
+        return await self.get_by_field(db, "email", email)
 
     async def get_by_username(self, db: AsyncSession, username: str) -> Any | None:
         """Fetch the user by username, or ``None``."""
-        result = await db.execute(select(self.model).where(self._attr("username") == username))
-        return result.scalar_one_or_none()
+        return await self.get_by_field(db, "username", username)
 
-    async def get_by_identifier(self, db: AsyncSession, identifier: str) -> Any | None:
-        """Look up by email when the identifier contains ``@``, else by username."""
-        if "@" in identifier:
-            return await self.get_by_email(db, identifier)
-        return await self.get_by_username(db, identifier)
+    async def resolve_login(self, db: AsyncSession, identifier: str) -> Any | None:
+        """Resolve a login identifier against ``login_fields``, in order; first match wins.
+
+        Replaces the old ``@``-heuristic: the contract decides which fields a login
+        identifier may match. Safe because every login field is asserted unique at
+        construction, so a match is unambiguous.
+        """
+        for logical in self.login_fields:
+            user = await self.get_by_field(db, logical, identifier)
+            if user is not None:
+                return user
+        return None
 
     async def get_by_oauth(
         self, db: AsyncSession, provider: str, provider_user_id: str

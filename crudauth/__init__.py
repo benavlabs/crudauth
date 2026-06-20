@@ -39,6 +39,8 @@ from .exceptions import (
 )
 from .crud_auth import CRUDAuth
 from .hooks import AuthHooks, HookContext
+from .identity import IdentityConfig
+from .models.mixin import AuthUserMixin, make_auth_identity
 from .oauth import OAuthCredentials
 from .principal import Principal
 from .provisioning import NewUserContext, NewUserFields
@@ -62,6 +64,9 @@ __all__ = [
     "EmailChannel",
     "AuthHooks",
     "HookContext",
+    "IdentityConfig",
+    "AuthUserMixin",
+    "make_auth_identity",
     "NewUserContext",
     "NewUserFields",
     "Transport",

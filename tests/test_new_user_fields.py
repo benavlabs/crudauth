@@ -318,6 +318,9 @@ async def test_suggested_name(sessionmaker) -> None:
         assert oauth_ctx.suggested_name == "Full Name"
         reg_ctx = NewUserContext(email="alice@x.com", username="a", source="register", db=db)
         assert reg_ctx.suggested_name == "alice"
+        # email-less (anonymous) shape falls back to the username, not ""
+        anon_ctx = NewUserContext(email="", username="neo", source="register", db=db)
+        assert anon_ctx.suggested_name == "neo"
 
 
 # --- mass-assignment: neither knob can grant privilege, on either path ----
