@@ -29,6 +29,7 @@ from .constants import (
     USED_TOKEN_TTL_SECONDS,
 )
 from .core import AuthContext, AuthRuntime, CookieConfig, Transport
+from .email.channel import DeliveryChannel
 from .email.router import build_email_router
 from .email.service import EmailFlowService
 from .exceptions import (
@@ -100,6 +101,7 @@ class CRUDAuth:
         column_map: dict[str, str] | None = None,
         oauth: dict[str, Any] | None = None,
         email: Any = None,
+        channels: list[DeliveryChannel] | None = None,
         hooks: AuthHooks | None = None,
         redirect_base_url: str | None = None,
         algorithm: str = DEFAULT_ALGORITHM,
@@ -129,8 +131,15 @@ class CRUDAuth:
                 column names when they differ (e.g. ``{"hashed_password": "pw_hash"}``).
             oauth: ``{provider_name: OAuthCredentials}`` to enable OAuth login;
                 requires ``redirect_base_url`` and a session transport.
-            email: An [EmailConfig][crudauth.email.config.EmailConfig] to enable verify/reset/change
-                flows; ``None`` disables them.
+            email: An [EmailConfig][crudauth.email.config.EmailConfig] to enable
+                verify/reset/change flows over email (the built-in delivery
+                channel); ``None`` disables email delivery. Either ``email`` or
+                ``channels`` enables the recovery endpoints.
+            channels: Additional [DeliveryChannel][crudauth.email.channel.DeliveryChannel]s
+                to route recovery tokens over (SMS, WhatsApp, push, ...). Fired
+                alongside the email channel if ``email`` is also set, every channel
+                best-effort. With ``channels`` and no ``email``, the recovery
+                endpoints still mount (token lifetimes fall back to the defaults).
             hooks: Lifecycle callbacks ([AuthHooks][crudauth.hooks.AuthHooks]).
             redirect_base_url: Public base URL used to build OAuth redirect URIs
                 and the post-login redirect default.
@@ -226,8 +235,8 @@ class CRUDAuth:
 
         self._email_service: EmailFlowService | None = None
         self._email_token_store: AbstractSessionStorage[Any] | None = None
-        if email is not None:
-            self._build_email(email, algorithm)
+        if email is not None or channels:
+            self._build_email(email, channels, algorithm)
 
         self._oauth_router: APIRouter | None = None
         self._oauth_state_storage: AbstractSessionStorage[Any] | None = None
@@ -357,7 +366,9 @@ class CRUDAuth:
         return self._session_transport.manager
 
     # --- email wiring --------------------------------------------------------
-    def _build_email(self, email: Any, algorithm: str) -> None:
+    def _build_email(
+        self, email: Any, channels: list[DeliveryChannel] | None, algorithm: str
+    ) -> None:
         backend, redis_url = self._backend_config()
         token_store = get_session_storage(
             backend, prefix="used_token:", expiration=USED_TOKEN_TTL_SECONDS, redis_url=redis_url
@@ -367,6 +378,7 @@ class CRUDAuth:
             repo=self.repo,
             secret_key=self.runtime.secret_key,
             config=email,
+            channels=channels,
             hooks=self.hooks,
             algorithm=algorithm,
             token_store=token_store,

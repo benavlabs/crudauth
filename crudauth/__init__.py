@@ -18,7 +18,14 @@ from __future__ import annotations
 from importlib.metadata import version
 
 from .core import AuthContext, CookieConfig, Transport
-from .email import EmailConfig, EmailSender
+from .email import (
+    DeliveryChannel,
+    DeliveryIntent,
+    DeliveryKind,
+    EmailChannel,
+    EmailConfig,
+    EmailSender,
+)
 from .exceptions import (
     BadRequestException,
     CSRFException,
@@ -49,6 +56,10 @@ __all__ = [
     "OAuthCredentials",
     "EmailConfig",
     "EmailSender",
+    "DeliveryChannel",
+    "DeliveryIntent",
+    "DeliveryKind",
+    "EmailChannel",
     "AuthHooks",
     "HookContext",
     "NewUserContext",
