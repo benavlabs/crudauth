@@ -127,6 +127,8 @@ edit_uri = "edit/main/docs/"
     { "Email, password, and Google" = "cookbook/email-password-and-google.md" },
     { "A token API (bearer)" = "cookbook/token-api.md" },
     { "Web and API in one backend" = "cookbook/web-and-api.md" },
+    { "Server-set fields at signup" = "cookbook/server-set-fields.md" },
+    { "Onboard an existing users table" = "cookbook/existing-users-table.md" },
 ]
 
 [[project.nav]]

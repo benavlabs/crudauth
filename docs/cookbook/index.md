@@ -68,6 +68,24 @@ so you can copy one and have the account shape you want.
 
     [Read →](web-and-api.md)
 
+-   **[Server-set fields at signup](server-set-fields.md)**
+
+    ---
+
+    Tiers, org ids, derived names: who sets a column at signup, and why the server-set ones
+    can't be forged.
+
+    [Read →](server-set-fields.md)
+
+-   **[Onboard an existing users table](existing-users-table.md)**
+
+    ---
+
+    Adopt CRUDAuth on a table you already have, mapping your column names instead of renaming
+    your schema.
+
+    [Read →](existing-users-table.md)
+
 </div>
 
 **Prerequisites:** a FastAPI app and an async SQLAlchemy 2.0 session dependency. Each recipe
