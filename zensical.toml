@@ -125,6 +125,7 @@ edit_uri = "edit/main/docs/"
     { "Transports" = "api/transports.md" },
     { "OAuth" = "api/oauth.md" },
     { "Email" = "api/email.md" },
+    { "Delivery channels" = "api/delivery.md" },
     { "Hooks" = "api/hooks.md" },
     { "Provisioning" = "api/provisioning.md" },
     { "Sudo" = "api/sudo.md" },
