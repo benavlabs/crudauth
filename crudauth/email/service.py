@@ -10,7 +10,13 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..constants import DEFAULT_ALGORITHM, SECONDS_PER_HOUR
+from ..constants import (
+    DEFAULT_ALGORITHM,
+    DEFAULT_CHANGE_TTL_HOURS,
+    DEFAULT_RESET_TTL_HOURS,
+    DEFAULT_VERIFY_TTL_HOURS,
+    SECONDS_PER_HOUR,
+)
 from ..exceptions import BadRequestException, DuplicateValueException
 from ..hooks import AuthHooks, HookContext
 from ..ratelimit import RateLimit
@@ -22,6 +28,7 @@ from ..transports.bearer.tokens import (
     verify_signed_token_full,
 )
 from ..utils import canonical_email, get_password_hash, verify_password
+from .channel import DeliveryChannel, DeliveryIntent, EmailChannel
 from .config import EmailConfig
 from .constants import (
     CHANGE,
@@ -29,11 +36,6 @@ from .constants import (
     EXISTING_ACCOUNT_ACTION,
     RESET,
     RESET_ACTION,
-    EmailKind,
-    SUBJECT_CHANGE,
-    SUBJECT_EXISTING_ACCOUNT,
-    SUBJECT_RESET,
-    SUBJECT_VERIFY,
     VERIFY,
     VERIFY_ACTION,
 )
@@ -52,13 +54,18 @@ class _UsedToken(BaseModel):
 
 
 class EmailFlowService:
-    """Mints/verifies signed tokens and drives the email flows.
+    """Mints/verifies signed tokens and drives the recovery flows.
 
-    The package owns token lifecycle; delivery is the app's
-    [EmailSender][crudauth.email.sender.EmailSender]. Trigger endpoints are throttled two ways: a
-    per-IP edge limit (in the router) and a **silent** per-target-email limit
-    here - silent because a 429 on a victim's address would re-introduce the
-    enumeration oracle and hand an attacker a DoS lever against that user.
+    The package owns token lifecycle; *delivery* is pluggable via one or more
+    [DeliveryChannel][crudauth.email.channel.DeliveryChannel]s (email is the
+    built-in one). Trigger endpoints are throttled two ways: a per-IP edge limit
+    (in the router) and a **silent** per-target-email limit here - silent because
+    a 429 on a victim's address would re-introduce the enumeration oracle and
+    hand an attacker a DoS lever against that user.
+
+    Construction is additive: pass ``config=EmailConfig(...)`` (back-compat, which
+    builds an [EmailChannel][crudauth.email.channel.EmailChannel] and seeds the
+    token TTLs) and/or ``channels=[...]`` plus explicit ``*_ttl_hours``.
     """
 
     def __init__(
@@ -66,23 +73,79 @@ class EmailFlowService:
         *,
         repo: UserRepository,
         secret_key: str,
-        config: EmailConfig,
         hooks: AuthHooks,
+        config: EmailConfig | None = None,
+        channels: list[DeliveryChannel] | None = None,
         algorithm: str = DEFAULT_ALGORITHM,
         token_store: AbstractSessionStorage[Any] | None = None,
         session_manager: "SessionManager | None" = None,
         rate_limiter: "RateLimiterBackend | None" = None,
         rate_limits: dict[str, RateLimit] | None = None,
+        verify_ttl_hours: int | None = None,
+        reset_ttl_hours: int | None = None,
+        change_ttl_hours: int | None = None,
     ):
         self.repo = repo
         self.secret_key = secret_key
-        self.config = config
         self.hooks = hooks
         self.algorithm = algorithm
         self.token_store = token_store
         self.session_manager = session_manager
         self.rate_limiter = rate_limiter
         self.rate_limits = rate_limits or {}
+
+        channel_list: list[DeliveryChannel] = []
+        if config is not None:
+            channel_list.append(EmailChannel(config))
+        if channels:
+            channel_list.extend(channels)
+        self._channels = channel_list
+
+        self.verify_ttl_hours = self._resolve_ttl(
+            verify_ttl_hours, config, "verify_ttl_hours", DEFAULT_VERIFY_TTL_HOURS
+        )
+        self.reset_ttl_hours = self._resolve_ttl(
+            reset_ttl_hours, config, "reset_ttl_hours", DEFAULT_RESET_TTL_HOURS
+        )
+        self.change_ttl_hours = self._resolve_ttl(
+            change_ttl_hours, config, "change_ttl_hours", DEFAULT_CHANGE_TTL_HOURS
+        )
+
+    @staticmethod
+    def _resolve_ttl(
+        override: int | None, config: EmailConfig | None, attr: str, default: int
+    ) -> int:
+        """TTL precedence: explicit override, then the EmailConfig's value, then
+        the package default. So a channels-only app still has token lifetimes."""
+        if override is not None:
+            return override
+        if config is not None:
+            return int(getattr(config, attr))
+        return default
+
+    async def _deliver(self, intent: DeliveryIntent, db: AsyncSession | None) -> None:
+        """Fire every configured channel best-effort, forwarding the request ``db``.
+
+        ``db`` is the request session (or ``None`` for the existing-account
+        notice); each channel may read from it synchronously to load an app column.
+
+        Per-channel isolation: the ``try`` is inside the loop, so one channel
+        raising cannot stop the next (a dead WhatsApp integration must not
+        suppress the email that recovers the account). Returns ``None`` regardless
+        and surfaces nothing - the ``request_*`` response is identical whether the
+        user existed or not, and there is deliberately no "at least one succeeded"
+        accounting (observing success would reopen the enumeration oracle).
+        """
+        for channel in self._channels:
+            try:
+                await channel.deliver(intent, db)
+            except Exception:
+                logger.warning(
+                    "crudauth: %s delivery via %s failed",
+                    intent.kind,
+                    type(channel).__name__,
+                    exc_info=True,
+                )
 
     # --- one-time-use guard --------------------------------------------------
     async def _consume(self, token: str, ttl_seconds: int) -> bool:
@@ -115,21 +178,6 @@ class EmailFlowService:
         )
         return not limited
 
-    async def _send_best_effort(self, *, to: str, subject: str, body: str, kind: EmailKind) -> None:
-        """Deliver a trigger email without letting a send failure fail the request.
-
-        These request endpoints only reach the send when the user/address exists,
-        so a propagated send error (blocking adapter + provider down) would 500
-        for existing addresses while absent ones return the uniform success - an
-        existence oracle. Swallow + log instead, preserving non-enumeration.
-        (Senders should enqueue rather than block; this is the safety net when
-        they don't.)
-        """
-        try:
-            await self.config.sender.send(to=to, subject=subject, body=body, kind=kind)
-        except Exception:
-            logger.warning("crudauth: %s email failed to send", kind, exc_info=True)
-
     async def notify_existing_account(self, email: str) -> None:
         """Tell an existing owner someone tried to register with their email.
 
@@ -150,14 +198,11 @@ class EmailFlowService:
         """
         if not await self._email_within_limit(EXISTING_ACCOUNT_ACTION, email):
             return
-        await self.config.sender.send(
-            to=email,
-            subject=SUBJECT_EXISTING_ACCOUNT,
-            body=(
-                "Someone tried to register with this email. You already have an "
-                f"account - sign in or reset your password at {self.config.frontend_url}."
+        await self._deliver(
+            DeliveryIntent(
+                kind="existing_account", token=None, user={}, recipient=email, expires_in=0
             ),
-            kind="existing_account",
+            None,
         )
 
     # --- email verification --------------------------------------------------
@@ -172,14 +217,18 @@ class EmailFlowService:
             self.secret_key,
             self.repo.user_id(user),
             VERIFY,
-            expires_hours=self.config.verify_ttl_hours,
+            expires_hours=self.verify_ttl_hours,
             algorithm=self.algorithm,
         )
-        await self._send_best_effort(
-            to=email,
-            subject=SUBJECT_VERIFY,
-            body=f"Verify your email: {self.config.link(self.config.verify_path, token)}",
-            kind="verify_email",
+        await self._deliver(
+            DeliveryIntent(
+                kind="verify_email",
+                token=token,
+                user=self.repo.to_dict(user),
+                recipient=email,
+                expires_in=self.verify_ttl_hours * SECONDS_PER_HOUR,
+            ),
+            db,
         )
 
     async def confirm_email_verification(self, db: AsyncSession, token: str) -> Any:
@@ -198,7 +247,7 @@ class EmailFlowService:
         sub = verify_signed_token(token, self.secret_key, VERIFY, algorithm=self.algorithm)
         if sub is None:
             raise BadRequestException("Invalid or expired token")
-        if not await self._consume(token, self.config.verify_ttl_hours * SECONDS_PER_HOUR):
+        if not await self._consume(token, self.verify_ttl_hours * SECONDS_PER_HOUR):
             raise BadRequestException("Token already used")
         user = await self.repo.get_by_id(db, sub)
         if user is None:
@@ -222,14 +271,18 @@ class EmailFlowService:
             self.secret_key,
             self.repo.user_id(user),
             RESET,
-            expires_hours=self.config.reset_ttl_hours,
+            expires_hours=self.reset_ttl_hours,
             algorithm=self.algorithm,
         )
-        await self._send_best_effort(
-            to=email,
-            subject=SUBJECT_RESET,
-            body=f"Reset your password: {self.config.link(self.config.reset_path, token)}",
-            kind="reset_password",
+        await self._deliver(
+            DeliveryIntent(
+                kind="reset_password",
+                token=token,
+                user=self.repo.to_dict(user),
+                recipient=email,
+                expires_in=self.reset_ttl_hours * SECONDS_PER_HOUR,
+            ),
+            db,
         )
 
     async def reset_password(self, db: AsyncSession, token: str, new_password: str) -> Any:
@@ -258,7 +311,7 @@ class EmailFlowService:
         sub = verify_signed_token(token, self.secret_key, RESET, algorithm=self.algorithm)
         if sub is None:
             raise BadRequestException("Invalid or expired token")
-        if not await self._consume(token, self.config.reset_ttl_hours * SECONDS_PER_HOUR):
+        if not await self._consume(token, self.reset_ttl_hours * SECONDS_PER_HOUR):
             raise BadRequestException("Token already used")
         user = await self.repo.get_by_id(db, sub)
         if user is None:
@@ -303,15 +356,19 @@ class EmailFlowService:
                 self.secret_key,
                 self.repo.user_id(user),
                 CHANGE,
-                expires_hours=self.config.change_ttl_hours,
+                expires_hours=self.change_ttl_hours,
                 algorithm=self.algorithm,
                 extra_claims={"new_email": new_email_c},
             )
-            await self._send_best_effort(
-                to=new_email_c,
-                subject=SUBJECT_CHANGE,
-                body=f"Confirm your new email: {self.config.link(self.config.change_path, token)}",
-                kind="change_email",
+            await self._deliver(
+                DeliveryIntent(
+                    kind="change_email",
+                    token=token,
+                    user=self.repo.to_dict(user),
+                    recipient=new_email_c,
+                    expires_in=self.change_ttl_hours * SECONDS_PER_HOUR,
+                ),
+                db,
             )
 
     async def confirm_email_change(self, db: AsyncSession, token: str) -> Any:
@@ -341,7 +398,7 @@ class EmailFlowService:
         user = await self.repo.get_by_id(db, payload["sub"])
         if user is None:
             raise BadRequestException("Invalid or expired token")
-        if not await self._consume(token, self.config.change_ttl_hours * SECONDS_PER_HOUR):
+        if not await self._consume(token, self.change_ttl_hours * SECONDS_PER_HOUR):
             raise BadRequestException("Token already used")
         try:
             await self.repo.update(db, user, {"email": new_email, "email_verified": True})

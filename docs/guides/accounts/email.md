@@ -77,6 +77,52 @@ The `-request` endpoints always return `200`, whether or not the address exists,
 don't leak which accounts are registered. Tokens are single-use and time-limited
 (`verify_ttl_hours`, `reset_ttl_hours`, `change_ttl_hours` on `EmailConfig`).
 
+## Delivery channels
+
+Email is the built-in delivery channel, but the token isn't email-specific. CRUDAuth owns the
+token (mint, one-time-use, redemption); a `DeliveryChannel` owns the medium and the copy. Pass
+`channels=` to route the same reset/verify token over SMS, WhatsApp, push, or several at once:
+
+```python
+from crudauth import CRUDAuth, DeliveryChannel, DeliveryIntent, EmailConfig
+
+class SMSChannel(DeliveryChannel):
+    async def deliver(self, intent: DeliveryIntent, db) -> None:
+        if intent.kind != "reset_password" or intent.token is None or db is None:
+            return
+        user = await db.get(User, intent.user["id"])   # load an app column synchronously
+        if user and user.phone:
+            link = f"https://app.example.com/reset-password?token={intent.token}"
+            await sms.enqueue(to=user.phone, body=f"Reset your password: {link}")  # hand off
+
+auth = CRUDAuth(
+    session=get_session, user_model=User, SECRET_KEY="change-me",
+    email=EmailConfig(sender=MySender(), frontend_url="https://app.example.com"),
+    channels=[SMSChannel()],
+)
+```
+
+Every configured channel fires for each flow, **best-effort and independent**: a channel that
+raises is logged and skipped, and never stops another channel or changes the endpoint's
+uniform `200` (so a dead integration can't leak which accounts exist or block the channel that
+actually recovers the account). Reliability (retry, queueing) lives inside a channel.
+
+`email=EmailConfig(...)` is just the built-in `EmailChannel`. With `channels=` and no
+`EmailConfig`, the recovery endpoints still mount, and token lifetimes fall back to the
+defaults (or pass `verify_ttl_hours` / `reset_ttl_hours` / `change_ttl_hours` to `CRUDAuth`).
+
+`deliver(intent, db)` receives the message descriptor plus the request session. Two things to
+know:
+
+- `intent.recipient` is the **email address** (the recovery lookup is still keyed on email;
+  per-field recovery like phone-as-identifier is a separate step). A non-email channel ignores
+  it and loads its own destination, as the SMS example does.
+- `intent.user` holds only CRUDAuth's logical fields, so an app column like `phone` isn't in
+  it. Read it off `db` with `intent.user["id"]` (the session is present for verify/reset/change,
+  `None` for the existing-account notice). Use `db` **synchronously** and never commit or
+  capture it: it closes when the request ends, so read what you need, then enqueue the send
+  (as above) rather than blocking on it.
+
 ## Hooks
 
 `on_after_email_verified`, `on_after_password_reset`, and `on_after_email_changed` fire after
