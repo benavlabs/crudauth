@@ -122,6 +122,9 @@ edit_uri = "edit/main/docs/"
     { "Overview" = "cookbook/index.md" },
     { "Email + password" = "cookbook/email-password.md" },
     { "Username-only accounts" = "cookbook/username-only.md" },
+    { "Phone recovery (SMS)" = "cookbook/phone-recovery.md" },
+    { "Sign in with Google" = "cookbook/sign-in-with-google.md" },
+    { "Email, password, and Google" = "cookbook/email-password-and-google.md" },
 ]
 
 [[project.nav]]
