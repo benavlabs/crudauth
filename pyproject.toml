@@ -54,6 +54,8 @@ dev = [
     "fakeredis>=2.20.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
+    "testcontainers[postgres]>=4.10.0",
+    "asyncpg>=0.29.0",
 ]
 docs = [
     "zensical>=0.0.15",
