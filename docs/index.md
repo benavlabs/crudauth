@@ -72,6 +72,11 @@
 
 For OAuth, Redis, and device parsing, install the extras: `pip install "crudauth[all]"`.
 
+CRUDAuth ships a [library skill](https://library-skills.io) embedded in the package, so AI coding
+agents follow its actual conventions in sync with the installed version. Install it into your project
+with `uvx library-skills` (add `--claude` for Claude Code); re-run it after upgrading to keep the
+skill current.
+
 ### 2. Mount the router
 
 Sessions are the default - no `transports=` needed. You get cookie auth, CSRF,

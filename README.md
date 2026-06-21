@@ -70,6 +70,18 @@ Or with uv:
 uv add crudauth
 ```
 
+## AI agents (library skill)
+
+crudauth ships a [library skill](https://library-skills.io) embedded in the package, so AI coding
+agents follow its actual conventions and gotchas (account shapes, gates, recovery, custom email
+bodies, production wiring) in sync with the version you installed. After adding crudauth, install it
+into your project:
+
+```bash
+uvx library-skills            # scans deps, links bundled skills (re-run to keep them in sync on upgrade)
+uvx library-skills --claude   # for Claude Code (.claude/skills)
+```
+
 ## Quickstart
 
 Sessions are the default - no `transports=` needed. You get cookie auth, CSRF,

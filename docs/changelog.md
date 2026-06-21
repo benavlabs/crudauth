@@ -18,10 +18,11 @@ branded HTML for the verify / reset / change emails instead of delivering crudau
   an XSS or credential-leak vector. `context.link` is the same assembled URL as in `body` (one
   source). Per-user personalization (`Hi Alice`) stays a `DeliveryChannel` concern (it has the `db`
   handle and owns escaping).
-- **Bundled Agent Skill** (`crudauth/.agents/skills/crudauth/`): crudauth now ships a
-  [library skill](https://agentskills.io), so AI coding agents that support the format get crudauth's
-  conventions and gotchas (account shapes, gates, recovery, custom email bodies, production wiring) on
-  demand when working in a project that depends on it. Installed automatically with the package.
+- **Bundled library skill** (`crudauth/.agents/skills/crudauth/`): crudauth now ships an embedded
+  [library skill](https://library-skills.io), so AI coding agents follow crudauth's actual conventions
+  and gotchas (account shapes, gates, recovery, custom email bodies, production wiring) in sync with the
+  installed version. It travels in the wheel; install it into your project's agent with
+  `uvx library-skills` (add `--claude` for Claude Code).
 
 #### Breaking changes
 - **`EmailSender.send` gains a required `context` parameter.** Add it to your `send` signature
