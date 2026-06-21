@@ -11,6 +11,7 @@ otherwise, each is importable straight from the top-level `crudauth` package.
 
 | Page | What's in it |
 |---|---|
+| [Endpoints](endpoints.md) | Every HTTP route CRUDAuth can mount, by area, and what gates each. |
 | [CRUDAuth](crud-auth.md) | The composition root. Configure transports, mount routers, and build the `current_user()` / `rate_limit()` / `require_sudo()` route guards. |
 | [Principal](principal.md) | The identity object every transport returns. |
 | [Core types](core.md) | `CookieConfig`, `AuthContext`, `AuthRuntime`. |

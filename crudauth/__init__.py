@@ -38,7 +38,7 @@ from .exceptions import (
     UnauthorizedException,
     UnprocessableEntityException,
 )
-from .crud_auth import CRUDAuth
+from .crud_auth import CRUDAuth, SessionInfo
 from .hooks import AuthHooks, HookContext
 from .identity import IdentityConfig
 from .models.mixin import AuthUserMixin, make_auth_identity
@@ -53,6 +53,7 @@ __version__ = version("crudauth")
 __all__ = [
     "__version__",
     "CRUDAuth",
+    "SessionInfo",
     "Principal",
     "SessionTransport",
     "BearerTransport",

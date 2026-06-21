@@ -21,3 +21,9 @@ Server-side sessions, CSRF, device management, and login lockout. Reachable as
 `auth.sessions` when a `SessionTransport` is configured.
 
 ::: crudauth.transports.session.manager.SessionManager
+
+## SessionInfo
+
+The response shape of `GET /sessions` (mounted by `SessionTransport(management_routes=True)`).
+
+::: crudauth.SessionInfo

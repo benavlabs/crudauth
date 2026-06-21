@@ -136,6 +136,7 @@ edit_uri = "edit/main/docs/"
 [[project.nav]]
 "API Reference" = [
     { "Overview" = "api/index.md" },
+    { "Endpoints" = "api/endpoints.md" },
     { "CRUDAuth" = "api/crud-auth.md" },
     { "Principal" = "api/principal.md" },
     { "Identity" = "api/identity.md" },

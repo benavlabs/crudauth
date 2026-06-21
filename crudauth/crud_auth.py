@@ -82,10 +82,21 @@ class _ChangePasswordIn(BaseModel):
 
 
 class SessionInfo(BaseModel):
-    """One active session, as returned by ``GET /sessions``.
+    """One active session, as returned by ``GET /sessions`` (the opt-in management route).
 
     ``device`` is the parsed user-agent info (browser/os/device flags), empty when
     UA parsing isn't available; timestamps serialize to ISO-8601.
+
+    Example:
+        ```python
+        # each entry in the GET /sessions response:
+        SessionInfo(
+            session_id="9f3c...",
+            device={"browser": "Chrome", "os": "macOS", "is_mobile": False},
+            ip="203.0.113.7",
+            created_at=created, last_activity=seen, current=True,
+        )
+        ```
     """
 
     session_id: str
