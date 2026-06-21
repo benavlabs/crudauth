@@ -7,4 +7,6 @@ and verifies the single-use tokens through `EmailFlowService`.
 
 ::: crudauth.email.EmailSender
 
+::: crudauth.email.EmailContext
+
 ::: crudauth.email.EmailFlowService

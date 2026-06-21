@@ -42,7 +42,7 @@
 - **Your model, your schema**: works over your existing SQLAlchemy `User` via a logical-field `column_map` - no forced renames, no second user table.
 - **Secure by default**: synchronizer-token CSRF, escalating per-IP/per-user login lockout, bcrypt with SHA-256 pre-hash (no 72-byte truncation), timing-equalized login, and trusted-proxy IP resolution.
 - **OAuth**: Google, GitHub, or a custom provider - with the `state` bound to the initiating browser to block login CSRF.
-- **Email flows**: verify / reset / change - you implement the `EmailSender` port, the package mints and verifies the signed, single-use tokens.
+- **Email flows**: verify / reset / change - you implement the `EmailSender` port (render your own HTML from `context.link`), the package mints and verifies the signed, single-use tokens.
 - **Sudo mode**: short-lived re-authentication to gate sensitive actions, stamped on the session and cleared on logout.
 - **Multi-device sessions**: list, revoke one, or "sign out everywhere", with a configurable per-user session cap.
 - **App policy in hooks**: `AuthHooks` for welcome email, trial grant, audit logging - fired uniformly across every auth path.
@@ -71,6 +71,11 @@
     ```
 
 For OAuth, Redis, and device parsing, install the extras: `pip install "crudauth[all]"`.
+
+CRUDAuth ships a [library skill](https://library-skills.io) embedded in the package, so AI coding
+agents follow its actual conventions in sync with the installed version. Install it into your project
+with `uvx library-skills` (add `--claude` for Claude Code); re-run it after upgrading to keep the
+skill current.
 
 ### 2. Mount the router
 

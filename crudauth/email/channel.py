@@ -22,6 +22,7 @@ from .constants import (
     SUBJECT_VERIFY,
     EmailKind,
 )
+from .sender import EmailContext
 
 if TYPE_CHECKING:  # pragma: no cover
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,11 +133,24 @@ class EmailChannel(DeliveryChannel):
                     f"account - sign in or reset your password at {cfg.frontend_url}."
                 ),
                 kind="existing_account",
+                context=EmailContext(
+                    kind="existing_account", link=None, recipient=intent.recipient, expires_in=0
+                ),
             )
             return
         subject, path_attr, prefix = _EMAIL_SPECS[intent.kind]
         assert intent.token is not None
         link = cfg.link(getattr(cfg, path_attr), intent.token)
         await cfg.sender.send(
-            to=intent.recipient, subject=subject, body=f"{prefix} {link}", kind=intent.kind
+            to=intent.recipient,
+            subject=subject,
+            body=f"{prefix} {link}",
+            kind=intent.kind,
+            # context.link is the SAME assembled URL as in body (one source), never the bare token.
+            context=EmailContext(
+                kind=intent.kind,
+                link=link,
+                recipient=intent.recipient,
+                expires_in=intent.expires_in,
+            ),
         )

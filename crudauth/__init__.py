@@ -24,6 +24,7 @@ from .email import (
     DeliveryKind,
     EmailChannel,
     EmailConfig,
+    EmailContext,
     EmailSender,
 )
 from .exceptions import (
@@ -58,6 +59,7 @@ __all__ = [
     "OAuthCredentials",
     "EmailConfig",
     "EmailSender",
+    "EmailContext",
     "DeliveryChannel",
     "DeliveryIntent",
     "DeliveryKind",

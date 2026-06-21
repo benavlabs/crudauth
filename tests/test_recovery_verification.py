@@ -305,5 +305,7 @@ async def test_phone_request_body_is_phone_shaped_not_email() -> None:
 async def test_email_less_phone_app_mounts_no_change_email() -> None:
     # change-email proves a real address; an email-less phone app doesn't mount it.
     async with _phone_app() as (auth, client, _maker, _channel):
-        r = await client.post("/email/change-request", json={"new_email": "a@x.com", "password": "pw"})
+        r = await client.post(
+            "/email/change-request", json={"new_email": "a@x.com", "password": "pw"}
+        )
         assert r.status_code == 404

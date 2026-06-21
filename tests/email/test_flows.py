@@ -16,8 +16,10 @@ class CapturingSender(EmailSender):
     def __init__(self) -> None:
         self.sent: list[dict] = []
 
-    async def send(self, *, to, subject, body, kind):
-        self.sent.append({"to": to, "subject": subject, "body": body, "kind": kind})
+    async def send(self, *, to, subject, body, kind, context):
+        self.sent.append(
+            {"to": to, "subject": subject, "body": body, "kind": kind, "context": context}
+        )
 
     def token_for(self, kind):
         for msg in reversed(self.sent):
@@ -165,7 +167,7 @@ async def test_reset_request_idempotent_for_unknown_email(ctx) -> None:
 
 
 class _BoomSender(EmailSender):
-    async def send(self, *, to, subject, body, kind) -> None:
+    async def send(self, *, to, subject, body, kind, context) -> None:
         raise RuntimeError("SMTP down")
 
 
@@ -191,7 +193,7 @@ async def test_reset_request_uniform_when_send_fails(sessionmaker, UserModel) ->
 
 
 class _FailingSender(EmailSender):
-    async def send(self, *, to, subject, body, kind) -> None:
+    async def send(self, *, to, subject, body, kind, context) -> None:
         raise RuntimeError("smtp down")
 
 

@@ -84,8 +84,8 @@ over blocking the request on SMTP:
 from crudauth import EmailConfig, EmailSender
 
 class MySender(EmailSender):
-    async def send(self, *, to, subject, body, kind):
-        # crudauth already built the subject and body (with the link). You deliver it.
+    async def send(self, *, to, subject, body, kind, context):
+        # plain: deliver crudauth's text body as-is.
         await tasks.enqueue(send_email, to=to, subject=subject, html=body)
 
 auth = CRUDAuth(
@@ -98,6 +98,12 @@ Passing `email=` is what mounts the verify, reset, and change-email routes. `fro
 where the links point: your frontend reads the token out of the URL and posts it back to the
 matching confirm endpoint. The `kind` argument tells your sender which message it's delivering
 (verification, reset, and so on) so you can pick a template.
+
+Want a branded HTML email instead of crudauth's plain text? Read `context`: `context.link` is the
+assembled URL, so you build your own template (`render(f"{kind}.html", link=context.link)`) without
+parsing the link out of `body`. The [email guide](../guides/accounts/email.md#sending-your-own-html)
+covers it; `context` deliberately carries no user data, so per-user copy is a
+[delivery channel](../guides/accounts/email.md#delivery-channels) job.
 
 ## 4. Register, log in, and protect a route
 

@@ -16,6 +16,7 @@ from crudauth import (
     CRUDAuth,
     CookieConfig,
     EmailConfig,
+    EmailContext,
     EmailSender,
     OAuthCredentials,
     SessionTransport,
@@ -377,7 +378,9 @@ class _Capture(EmailSender):
     def __init__(self) -> None:
         self.sent: list[dict] = []
 
-    async def send(self, *, to: str, subject: str, body: str, kind: str) -> None:
+    async def send(
+        self, *, to: str, subject: str, body: str, kind: str, context: EmailContext
+    ) -> None:
         self.sent.append({"to": to, "kind": kind})
 
 

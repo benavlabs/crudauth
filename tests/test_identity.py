@@ -33,7 +33,7 @@ SECRET = "test-secret-key-0123456789-0123456789"
 
 class _Sender(EmailSender):
     async def send(
-        self, *, to, subject, body, kind
+        self, *, to, subject, body, kind, context
     ) -> None:  # pragma: no cover - never sent in these tests
         pass
 

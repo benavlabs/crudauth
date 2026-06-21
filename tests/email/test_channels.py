@@ -41,8 +41,10 @@ class CapturingSender(EmailSender):
     def __init__(self) -> None:
         self.sent: list[dict] = []
 
-    async def send(self, *, to, subject, body, kind) -> None:
-        self.sent.append({"to": to, "subject": subject, "body": body, "kind": kind})
+    async def send(self, *, to, subject, body, kind, context) -> None:
+        self.sent.append(
+            {"to": to, "subject": subject, "body": body, "kind": kind, "context": context}
+        )
 
 
 async def _make_user(repo, sessionmaker, email="real@x.com") -> None:

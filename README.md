@@ -45,7 +45,7 @@
 - **Your model, your schema**: works over your existing SQLAlchemy `User` via a logical-field `column_map` - no forced renames, no second user table.
 - **Secure by default**: synchronizer-token CSRF, escalating per-IP/per-user login lockout, bcrypt with SHA-256 pre-hash (no 72-byte truncation), timing-equalized login, and trusted-proxy IP resolution.
 - **OAuth**: Google, GitHub, or a custom provider - with the `state` bound to the initiating browser to block login CSRF.
-- **Email flows**: verify / reset / change - you implement the `EmailSender` port, the package mints and verifies the signed, single-use tokens.
+- **Email flows**: verify / reset / change - you implement the `EmailSender` port (render your own HTML from `context.link`), the package mints and verifies the signed, single-use tokens.
 - **Sudo mode**: short-lived re-authentication to gate sensitive actions, stamped on the session and cleared on logout.
 - **Multi-device sessions**: list, revoke one, or "sign out everywhere", with a configurable per-user session cap.
 - **App policy in hooks**: `AuthHooks` for welcome email, trial grant, audit logging - fired uniformly across every auth path.
@@ -68,6 +68,18 @@ Or with uv:
 
 ```bash
 uv add crudauth
+```
+
+## AI agents (library skill)
+
+crudauth ships a [library skill](https://library-skills.io) embedded in the package, so AI coding
+agents follow its actual conventions and gotchas (account shapes, gates, recovery, custom email
+bodies, production wiring) in sync with the version you installed. After adding crudauth, install it
+into your project:
+
+```bash
+uvx library-skills            # scans deps, links bundled skills (re-run to keep them in sync on upgrade)
+uvx library-skills --claude   # for Claude Code (.claude/skills)
 ```
 
 ## Quickstart

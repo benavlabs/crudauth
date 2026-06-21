@@ -5,6 +5,33 @@ breaking changes; those are called out explicitly.
 
 ___
 
+## 0.4.0 - 2026-06-21
+
+Custom email bodies. `EmailSender.send` now receives an `EmailContext`, so you render your own
+branded HTML for the verify / reset / change emails instead of delivering crudauth's plain text.
+
+#### Added
+- **`EmailContext` on `EmailSender.send`:** the sender now gets the assembled `link` (the token
+  embedded in the URL), `kind`, `recipient`, and `expires_in`, so it can build a real HTML template
+  without parsing the link out of `body`. The context carries crudauth-owned render data only -
+  never the bare token, never user-controlled fields - so a sender that drops it into HTML can't be
+  an XSS or credential-leak vector. `context.link` is the same assembled URL as in `body` (one
+  source). Per-user personalization (`Hi Alice`) stays a `DeliveryChannel` concern (it has the `db`
+  handle and owns escaping).
+- **Bundled library skill** (`crudauth/.agents/skills/crudauth/`): crudauth now ships an embedded
+  [library skill](https://library-skills.io), so AI coding agents follow crudauth's actual conventions
+  and gotchas (account shapes, gates, recovery, custom email bodies, production wiring) in sync with the
+  installed version. It travels in the wheel; install it into your project's agent with
+  `uvx library-skills` (add `--claude` for Claude Code).
+
+#### Breaking changes
+- **`EmailSender.send` gains a required `context` parameter.** Add it to your `send` signature
+  (`async def send(self, *, to, subject, body, kind, context)`); behavior is unchanged because
+  `body` is still the pre-rendered plain-text fallback, so a sender that ignores `context` produces
+  the same email as before.
+
+___
+
 ## 0.3.0 - 2026-06-20
 
 Account shapes. CRUDAuth's identity and recovery are now read from your model instead of assumed

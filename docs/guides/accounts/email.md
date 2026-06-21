@@ -14,8 +14,9 @@ they enable the six routes below.
 from crudauth import CRUDAuth, EmailConfig, EmailSender
 
 class MySender(EmailSender):
-    async def send(self, *, to, subject, body, kind):
-        # crudauth already built the subject and body (with the link). You deliver it.
+    async def send(self, *, to, subject, body, kind, context):
+        # plain: deliver crudauth's text as-is. branded HTML: build your own
+        # from context.link (the assembled URL), no need to parse it out of body.
         await tasks.enqueue(send_email, to=to, subject=subject, html=body)
 
 auth = CRUDAuth(
@@ -28,6 +29,24 @@ app.include_router(auth.router)   # adds the verify / reset / change routes
 Prefer enqueueing onto a task queue over blocking on SMTP here: registration sends are
 best-effort (a failure is logged), but the verify/reset/change flows surface a raised send as
 a 5xx.
+
+### Sending your own HTML
+
+`body` is crudauth's plain-text default. To send a branded template, read `context`
+([`EmailContext`](../../api/email.md)): `context.link` is the assembled, ready-to-click URL, so
+you build a real button without regexing the link out of `body`, and `context.kind` /
+`context.expires_in` round out the copy.
+
+```python
+async def send(self, *, to, subject, body, kind, context):
+    html = render(f"emails/{kind}.html", link=context.link, expires_in=context.expires_in)
+    await tasks.enqueue(send_email, to=to, subject=subject, html=html)
+```
+
+`context` carries crudauth-owned data only (link, kind, recipient, expiry), never the bare token
+and never user-controlled fields, so the sender can't be an injection vector. For per-user copy
+(`Hi Alice`), write a [delivery channel](#delivery-channels) instead: it gets the `db` handle and
+the user row, and owns its own escaping.
 
 <p align="center">
   <img src="../../assets/diagrams/email-flow-light.png#only-light" alt="Three-step email flow: a request endpoint always returns 200, CRUDAuth signs a single-use token and your EmailSender delivers the link, and the confirm endpoint verifies and consumes the token once" width="100%">
@@ -82,6 +101,10 @@ don't leak which accounts are registered. Tokens are single-use and time-limited
 Email is the built-in delivery channel, but the token isn't email-specific. CRUDAuth owns the
 token (mint, one-time-use, redemption); a `DeliveryChannel` owns the medium and the copy. Pass
 `channels=` to route the same reset/verify token over SMS, WhatsApp, push, or several at once:
+
+If you only want a branded HTML *email* (not a new medium), you don't need a channel: read
+`context.link` in your `EmailSender` ([Sending your own HTML](#sending-your-own-html) above). Reach
+for a channel when you need a different medium, or per-user copy that loads data off the `db`.
 
 ```python
 from crudauth import CRUDAuth, DeliveryChannel, DeliveryIntent, EmailConfig

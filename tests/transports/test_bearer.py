@@ -13,6 +13,7 @@ from crudauth import (
     CookieConfig,
     CRUDAuth,
     EmailConfig,
+    EmailContext,
     EmailSender,
     Principal,
     SessionTransport,
@@ -221,7 +222,9 @@ class _Capture(EmailSender):
     def __init__(self) -> None:
         self.sent: list[dict] = []
 
-    async def send(self, *, to: str, subject: str, body: str, kind: str) -> None:
+    async def send(
+        self, *, to: str, subject: str, body: str, kind: str, context: EmailContext
+    ) -> None:
         self.sent.append({"body": body, "kind": kind})
 
     def token_for(self, kind: str) -> str:
