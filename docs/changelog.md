@@ -5,6 +5,35 @@ breaking changes; those are called out explicitly.
 
 ___
 
+## 0.6.0 - 2026-06-21
+
+CRUDAuth as a toolbox. The hardened auth flows that used to live only inside the route handlers
+are now reusable primitives, the wired services are all reachable off `auth`, and the building
+blocks are exported from the package root - so you can hand-roll a login, mint a token in a
+webhook, or skip the routes entirely without losing the hardening. Everything is additive.
+
+#### Added
+- **`auth.authenticate_password(db, identifier, password, *, request)`** - the credential check
+  behind `/login` and `/token` (shared escalating lockout, timing-equalized verification,
+  disabled-account check), now a callable primitive on `CRUDAuth` and `AuthRuntime`. `/login` and
+  `/token` were de-duplicated onto it.
+- **`auth.issue_tokens(user, *, scopes=None)`** (and `BearerTransport.issue_tokens`) - the bearer
+  issuance behind `/token`, with scope clamping and the `token_version` epoch. Reach for it instead
+  of bare `create_access_token`, which skips both. `/token` issues through it; `/refresh` shares the
+  underlying access-token minting.
+- **`auth.emails`** (the `EmailFlowService`) and **`auth.oauth`** (the `OAuthAccountService`)
+  accessors, `None` when unconfigured - matching `auth.repo` / `auth.sessions` / `auth.sudo`.
+- **Building blocks exported** from `crudauth`: `UserRepository`, `SessionManager`, `SudoManager`,
+  `EmailFlowService`, `OAuthAccountService`, and the password helpers `get_password_hash`,
+  `verify_password`, `is_unusable_password`, `make_unusable_password`. (Raw token-mint functions
+  stay unexported on purpose - use `issue_tokens` so the clamp and epoch come along.)
+- A **"Use the building blocks"** cookbook recipe, and an end-to-end test suite against real
+  Postgres (testcontainers) covering the login / token / refresh / lockout / revocation paths.
+
+No breaking changes.
+
+___
+
 ## 0.5.0 - 2026-06-21
 
 Account & device management. The session/device endpoints apps kept hand-writing are now opt-in
