@@ -163,15 +163,23 @@ class AbstractOAuthProvider(ABC):
 
         Raises:
             httpx.HTTPStatusError: If the token endpoint returns an error status.
+
+        Note:
+            ``client_secret`` is included only when the provider actually has
+            one. A public client (PKCE-only, ``token_endpoint_auth_method=none``)
+            must not send client authentication - several IdPs reject an empty
+            ``client_secret`` outright - and its proof is the PKCE verifier,
+            which is sent either way.
         """
         httpx = _require_httpx()
         data = {
             "client_id": self.client_id,
-            "client_secret": self.client_secret,
             "code": code,
             "redirect_uri": self.redirect_uri,
             "grant_type": "authorization_code",
         }
+        if self.client_secret:
+            data["client_secret"] = self.client_secret
         if code_verifier:
             data["code_verifier"] = code_verifier
         req_headers = {"Accept": "application/json"}
