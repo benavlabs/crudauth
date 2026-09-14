@@ -42,3 +42,7 @@ GITHUB_TOKEN_ENDPOINT = "https://github.com/login/oauth/access_token"
 GITHUB_USERINFO_ENDPOINT = "https://api.github.com/user"
 GITHUB_EMAILS_ENDPOINT = "https://api.github.com/user/emails"
 GITHUB_DEFAULT_SCOPES = ["read:user", "user:email"]
+
+# Generic OIDC: discovery path + the minimal scopes for an id/userinfo lookup.
+OIDC_DISCOVERY_PATH = "/.well-known/openid-configuration"
+OIDC_DEFAULT_SCOPES = ["openid", "profile", "email"]
