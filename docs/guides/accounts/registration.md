@@ -95,8 +95,8 @@ ids, the PK) is dropped and warned, never set.
 
 ## Registering users from your own route
 
-An app that doesn't mount `/register` — because signup needs its own response shape, or its own
-columns — writes the user row itself. CRUDAuth's allowlist protects its own route, not yours, so
+An app that doesn't mount `/register`, because signup needs its own response shape or its own
+columns, writes the user row itself. CRUDAuth's allowlist protects its own route, not yours, so
 the privileged fields become yours to refuse:
 
 ```python
@@ -109,7 +109,7 @@ class SignUp(BaseModel):
 ```
 
 Nothing privileged is declared, `extra="forbid"` turns an attempt into a 422, and the row is built
-from those fields plus a hash — never from `**payload.model_dump()`, which carries whatever the
+from those fields plus a hash, never from `**payload.model_dump()`, which carries whatever the
 schema grew since.
 
 Assert it, so a field added later can't reopen it:
@@ -128,7 +128,7 @@ keeps by default is `crudauth.REGISTRATION_ALLOWED_FIELDS`.
 email, and CRUDAuth *claims* the account when it isn't verified: the password becomes unusable,
 MFA is cleared, `token_version` is bumped and every session is terminated. That's what stops
 someone registering under an address they don't own and keeping access after its owner signs in
-with Google. A signup route that accepts `email_verified` lets them skip it — they register as
+with Google. A signup route that accepts `email_verified` lets them skip it: they register as
 already verified, so the claim never runs and their password still works on the account the owner
 now uses. The same goes for `google_id` and `github_id`: they decide which account a provider
 login resolves to.
