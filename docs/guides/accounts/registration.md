@@ -93,6 +93,46 @@ first, then `new_user_fields`, so a derived value can override a constant. Both 
 the allowlist: a CRUDAuth-owned field (`is_superuser`, `email_verified`, the password, the oauth
 ids, the PK) is dropped and warned, never set.
 
+## Registering users from your own route
+
+An app that doesn't mount `/register`, because signup needs its own response shape or its own
+columns, writes the user row itself. CRUDAuth's allowlist protects its own route, not yours, so
+the privileged fields become yours to refuse:
+
+```python
+class SignUp(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    username: str
+    password: str
+```
+
+Nothing privileged is declared, `extra="forbid"` turns an attempt into a 422, and the row is built
+from those fields plus a hash, never from `**payload.model_dump()`, which carries whatever the
+schema grew since.
+
+Assert it, so a field added later can't reopen it:
+
+```python
+def test_signup_accepts_no_privileged_field():
+    assert not auth.repo.gated_register_fields(SignUp.model_fields)
+```
+
+[`gated_register_fields`](../../api/repository.md#crudauth.repository.UserRepository.gated_register_fields) answers with the
+privileged fields a set of names contains, by logical name *and* by mapped column, so a `column_map`
+alias is caught too. The full set is `crudauth.REGISTRATION_GATED_FIELDS`, and what registration
+keeps by default is `crudauth.REGISTRATION_ALLOWED_FIELDS`.
+
+**Why `email_verified` matters most.** A provider login links to an existing account with that
+email, and CRUDAuth *claims* the account when it isn't verified: the password becomes unusable,
+MFA is cleared, `token_version` is bumped and every session is terminated. That's what stops
+someone registering under an address they don't own and keeping access after its owner signs in
+with Google. A signup route that accepts `email_verified` lets them skip it: they register as
+already verified, so the claim never runs and their password still works on the account the owner
+now uses. The same goes for `google_id` and `github_id`: they decide which account a provider
+login resolves to.
+
 ## Duplicate emails
 
 Registering with an address that already exists returns the same generic response as a new

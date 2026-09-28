@@ -105,3 +105,11 @@ want. The registration allowlist gates the **mapped** column too (`is_admin` is 
 - `recovery=None` means no recovery endpoints mount and `current_user(verified=True)` raises.
 - The `{factor}_verified` flag is set only by token redemption; it's gated on every write path
   (register allowlist, `new_user_defaults`, `new_user_fields`).
+- **A signup route the app writes itself is outside all of that.** The allowlist guards
+  `/register`, not your handler. Declare only `email`, `username`, `password` (plus opted-in
+  extras), set `extra="forbid"`, and build the row field by field rather than from
+  `**payload.model_dump()`. Assert it with
+  `assert not auth.repo.gated_register_fields(SignUp.model_fields)` - it answers with the
+  privileged names a schema contains, by logical *and* mapped column name. The set is
+  `crudauth.REGISTRATION_GATED_FIELDS`. Accepting `email_verified`, `google_id` or `github_id`
+  there is an account-takeover path, not a convenience: see `oauth.md`.

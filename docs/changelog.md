@@ -5,6 +5,31 @@ breaking changes; those are called out explicitly.
 
 ___
 
+## 0.7.2 - 2026-09-28
+
+Guardrails for apps that register users through their own route instead of `/register`. The
+allowlist has always protected crudauth's own endpoint; nothing helped an app audit the schema it
+wrote itself, and accepting `email_verified` there defeats the OAuth account claim.
+
+#### Added
+- **`REGISTRATION_ALLOWED_FIELDS` and `REGISTRATION_GATED_FIELDS` are exported from the package
+  root**, next to the existing `UserRepository.gated_register_fields(names)`, which answers with the
+  privileged fields a set of names contains - by logical name and by mapped column, so a
+  `column_map` alias is caught. An app with its own signup route can assert
+  `not auth.repo.gated_register_fields(SignUp.model_fields)` in a test.
+
+#### Documentation
+- **"Registering users from your own route"** in the registration guide: what such a schema may
+  declare, why the row is built field by field rather than from `**payload.model_dump()`, and why
+  `email_verified` is the one that turns a careless signup into account takeover - the provider
+  login finds an account that looks verified, skips the claim, and leaves the registrant's password
+  working.
+- The same rule in the agent skill references, in `identity.md` (the schema and the assertion) and
+  `oauth.md` (that the claim only holds while `email_verified` is server-owned, and that an app
+  doing its own linking has to claim as well).
+
+___
+
 ## 0.7.1 - 2026-09-18
 
 Two fixes that came out of moving the FastAPI boilerplate onto 0.7.0. A redirect-mode OAuth callback
