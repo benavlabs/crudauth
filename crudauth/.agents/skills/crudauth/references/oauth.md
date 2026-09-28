@@ -71,6 +71,20 @@ only** (open-redirect hardened).
      derived from the profile, cut to the `username` column's length (32 when unbounded), with `_1`,
      `_2`, ... then a random suffix on collision.
 
+**The claim only works while `email_verified` is server-owned.** It's the whole defense against
+someone registering under an address they don't control: the owner's provider login takes the
+account back. A signup route the app wrote itself that accepts `email_verified` in its body lets an
+attacker register as already verified, so the link finds a "verified" account, skips the claim, and
+leaves their password working on the account the owner now signs into. Same for `google_id` /
+`github_id`, which decide *which* account a login resolves to. If the app doesn't mount `/register`,
+check its own schema: `auth.repo.gated_register_fields(SignUp.model_fields)` must be empty. See
+`identity.md`.
+
+**An app that links accounts itself** (its own routes over `OAuthAccountService` is fine; its own
+linking code is not) has to claim too. Linking a provider id onto an account by email without
+making the password unusable, bumping `token_version` and terminating sessions hands the account to
+whoever registered the address first, whatever `email_verified` says.
+
 A disabled user gets no session (`account_inactive`). Failures redirect to `redirect_base_url` with
 `?error=<code>` (`oauth_failed`, `invalid_state`, `email_missing`, `email_unverified`,
 `email_too_long`, `provider_already_linked`, `account_inactive`), or return `400 {"detail": "<code>"}`

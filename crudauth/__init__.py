@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from importlib.metadata import version
 
+from .constants import REGISTRATION_ALLOWED_FIELDS, REGISTRATION_GATED_FIELDS
 from .core import AuthContext, CookieConfig, Transport
 from .email import (
     DeliveryChannel,
@@ -71,6 +72,8 @@ __version__ = version("crudauth")
 __all__ = [
     "__version__",
     "CRUDAuth",
+    "REGISTRATION_ALLOWED_FIELDS",
+    "REGISTRATION_GATED_FIELDS",
     "SessionInfo",
     "Principal",
     "SessionTransport",

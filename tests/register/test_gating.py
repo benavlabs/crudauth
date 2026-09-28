@@ -211,3 +211,24 @@ def test_no_warning_for_clean_schema(get_session, UserModel, caplog) -> None:
         )
     assert "privileged field" not in caplog.text
     assert "will drop" not in caplog.text
+
+
+# =============================================================================
+# The check an app uses on a signup route it wrote itself
+# =============================================================================
+def test_the_field_sets_are_importable_from_the_package_root() -> None:
+    """An app auditing its own schema shouldn't have to reach into a submodule."""
+    import crudauth
+
+    assert crudauth.REGISTRATION_ALLOWED_FIELDS == REGISTRATION_ALLOWED_FIELDS
+    assert crudauth.REGISTRATION_GATED_FIELDS == REGISTRATION_GATED_FIELDS
+
+
+def test_gated_register_fields_names_what_a_hand_rolled_schema_would_leak(UserModel) -> None:
+    """The one-line guard for an app that writes its own signup route."""
+    repo = UserRepository(UserModel)
+
+    leaked = repo.gated_register_fields(DangerousRegister.model_fields)
+
+    assert leaked == {"is_superuser", "email_verified"}
+    assert not repo.gated_register_fields({"email", "username", "password"})
