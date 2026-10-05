@@ -1,6 +1,6 @@
 [project]
 name = "crudauth"
-version = "0.7.2"
+version = "0.7.3"
 description = "Batteries-included, transport-agnostic authentication for FastAPI."
 readme = "README.md"
 license = "MIT"

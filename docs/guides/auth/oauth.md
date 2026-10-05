@@ -83,8 +83,8 @@ configured), so a hand-written callback can reuse it:
 
 ## Errors
 
-A failed callback redirects to `redirect_base_url` with `?error=<code>`, or returns `400` with
-`{"detail": "<code>"}` in JSON mode:
+A failed callback redirects to `oauth_default_redirect` (by default `redirect_base_url`) with
+`?error=<code>`, or returns `400` with `{"detail": "<code>"}` in JSON mode:
 
 | Code | Meaning |
 |------|---------|
@@ -207,6 +207,26 @@ The redirect URI follows the same paths, here
 `https://app.example.com/api/v1/auth/oauth/callback/google`. CRUDAuth doesn't see a prefix
 you add when mounting (`app.include_router(auth.router, prefix="/api")`), so include that
 prefix in `redirect_base_url` as well.
+
+### When the app isn't at the root
+
+`redirect_base_url` builds the redirect URI registered with the provider, so it can't carry the
+path an app is served under. A redirect-mode callback sends the browser there when `redirect_to`
+is missing or unsafe, when the sign-in fails, and when it needs an MFA challenge. If the app
+lives elsewhere, say a single-page app under `/app` with a landing page at `/`, point those at it
+with `oauth_default_redirect`:
+
+```python
+auth = CRUDAuth(
+    ...,
+    redirect_base_url="https://example.com",
+    oauth_default_redirect="/app/login",
+)
+```
+
+A failure then lands on `/app/login?error=<code>`, and an MFA challenge on
+`/app/login#mfa_challenge=...`. It takes a same-origin path or an absolute `http(s)` URL;
+anything else is refused at startup. A safe `redirect_to` still wins over it.
 
 `auth.oauth_router` returns only the OAuth routes, for apps that mount their own auth routes
 instead of `auth.router`. Mount one or the other, not both.

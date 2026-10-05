@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-__all__ = ["DEFAULT_OAUTH_PATHS", "resolve_oauth_paths", "callback_url"]
+from urllib.parse import urlsplit
+
+from ..utils import safe_redirect_path
+
+__all__ = ["DEFAULT_OAUTH_PATHS", "resolve_oauth_paths", "callback_url", "is_redirect_target"]
 
 DEFAULT_OAUTH_PATHS = {
     "prefix": "/oauth",
@@ -30,3 +34,11 @@ def callback_url(base_url: str, paths: dict[str, str], provider: str) -> str:
     callback = paths["callback_path"].replace("{provider}", provider)
     route = "/".join(part.strip("/") for part in (paths["prefix"], callback) if part.strip("/"))
     return f"{base_url.rstrip('/')}/{route}"
+
+
+def is_redirect_target(target: str) -> bool:
+    """Whether ``target`` is a same-origin path or an absolute ``http(s)`` URL."""
+    if safe_redirect_path(target, default="") == target:
+        return True
+    parts = urlsplit(target)
+    return parts.scheme in ("http", "https") and bool(parts.netloc)

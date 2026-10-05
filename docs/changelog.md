@@ -5,6 +5,22 @@ breaking changes; those are called out explicitly.
 
 ___
 
+## 0.7.3 - 2026-10-05
+
+An app that isn't served at the root of `redirect_base_url` can now say where a redirect-mode OAuth
+callback lands when it has nowhere else to go. No breaking changes.
+
+#### Added
+- **`CRUDAuth(oauth_default_redirect=...)`**: where the callback sends the browser on failure
+  (`?error=<code>`), on an MFA challenge (`#mfa_challenge=...`), and when `redirect_to` is missing or
+  unsafe. A same-origin path such as `"/app/login"` or an absolute `http(s)` URL; anything else is
+  refused at startup. It defaults to `redirect_base_url`, as before. `redirect_base_url` can't carry
+  the app's path, because it also builds the redirect URI registered with the provider, so a
+  single-page app under `/app` next to a landing page at `/` had its failed sign-ins land on the
+  landing page.
+
+___
+
 ## 0.7.2 - 2026-09-28
 
 Guardrails for apps that register users through their own route instead of `/register`. The
