@@ -165,7 +165,7 @@ login [claims an account](oauth.md#account-linking) whose email was never verifi
 any MFA enrollment on it, since whoever registered that account set it up. With
 `MfaConfig(oauth=True)`, the callback returns a challenge for an account with MFA instead of a
 session. In JSON mode it's the challenge body; in redirect mode it's a redirect to
-`redirect_base_url#mfa_challenge=<challenge>`. The fragment never reaches a server, but it stays in
+`{oauth_default_redirect}#mfa_challenge=<challenge>` (by default `redirect_base_url`). The fragment never reaches a server, but it stays in
 the browser history, so read it and remove it right away
 (`history.replaceState(null, "", location.pathname + location.search)`). For a setup challenge that
 arrives this way, `POST /mfa/challenge` with `{"challenge"}` returns its `setup` details. The

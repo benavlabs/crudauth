@@ -48,7 +48,7 @@ from .oauth import (
     OAuthCredentials,
     OAuthProviderFactory,
 )
-from .oauth.paths import callback_url, resolve_oauth_paths
+from .oauth.paths import callback_url, is_redirect_target, resolve_oauth_paths
 from .oauth.router import build_oauth_router
 from .password import PasswordContext, PasswordPolicy, PasswordSource
 from .principal import Principal
@@ -121,6 +121,7 @@ class CRUDAuth:
         oauth: dict[str, Any] | None = None,
         oauth_paths: dict[str, str] | None = None,
         oauth_response_mode: Literal["redirect", "json"] = "redirect",
+        oauth_default_redirect: str | None = None,
         email: Any = None,
         channels: list[DeliveryChannel] | None = None,
         hooks: AuthHooks | None = None,
@@ -168,6 +169,14 @@ class CRUDAuth:
                 mode ``authorize`` returns ``{"url": ...}`` and ``callback``
                 returns ``{"user": ..., "csrf_token": ..., "redirect_to": ...}``
                 with the session cookies set, or a ``400`` on failure.
+            oauth_default_redirect: Where a redirect-mode callback sends the browser
+                when ``redirect_to`` is absent or unsafe, on failure (with
+                ``?error=<code>``) and on an MFA challenge (with
+                ``#mfa_challenge=...``). A same-origin path such as ``"/app/login"``
+                or an absolute ``http(s)`` URL; defaults to ``redirect_base_url``.
+                Set it when the app doesn't live at the root of
+                ``redirect_base_url``, which can't carry the path because it also
+                builds the provider redirect URI.
             email: An [EmailConfig][crudauth.email.config.EmailConfig] to enable
                 verify/reset/change flows over email (the built-in delivery
                 channel); ``None`` disables email delivery. Either ``email`` or
@@ -316,7 +325,9 @@ class CRUDAuth:
         if email is not None or channels:
             self._build_email(email, channels)
         if oauth:
-            self._build_oauth(oauth, redirect_base_url, oauth_paths, oauth_response_mode)
+            self._build_oauth(
+                oauth, redirect_base_url, oauth_paths, oauth_response_mode, oauth_default_redirect
+            )
 
         if oauth and mfa is not None:
             self._warn_on_oauth_skipping_required_mfa(mfa)
@@ -572,12 +583,18 @@ class CRUDAuth:
         redirect_base_url: str | None,
         oauth_paths: dict[str, str] | None,
         response_mode: Literal["redirect", "json"],
+        default_redirect: str | None,
     ) -> None:
         sessions = self._require_session_manager(
             "OAuth establishes a session on callback; add a SessionTransport to transports=[...]."
         )
         if not redirect_base_url:
             raise ValueError("redirect_base_url is required when oauth=... is configured")
+        if default_redirect is not None and not is_redirect_target(default_redirect):
+            raise ValueError(
+                f"oauth_default_redirect {default_redirect!r} must be a same-origin path "
+                "such as '/app/login' or an absolute http(s) URL"
+            )
         paths = resolve_oauth_paths(oauth_paths)
         self._oauth_providers = {
             name: self._oauth_provider(
@@ -598,7 +615,7 @@ class CRUDAuth:
             account_service=self._oauth_service,
             session_manager=sessions,
             authorize_rate_limit=self.rate_limit("oauth_authorize"),
-            default_redirect=redirect_base_url,
+            default_redirect=default_redirect or redirect_base_url,
             response_mode=response_mode,
             **paths,
         )

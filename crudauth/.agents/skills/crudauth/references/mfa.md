@@ -38,7 +38,7 @@ Startup raises if a column is missing (map with `column_map=`), the key isn't a 
   working. Enabling MFA doesn't sign out other sessions (revoke them in `on_after_mfa_enabled`).
 - OAuth: an OAuth claim of an unverified account removes its MFA enrollment. Skipped unless `MfaConfig(oauth=True)`,
   even for `required` accounts (startup warns); then the callback returns the challenge (JSON) or
-  redirects to `redirect_base_url#mfa_challenge=...` (strip it from history with
+  redirects to `oauth_default_redirect#mfa_challenge=...` (default `redirect_base_url`) (strip it from history with
   `history.replaceState`). `POST /mfa/challenge {"challenge"}` returns `setup` details; the verify
   response carries `redirect_to`.
 - A hand-written login: `authenticate_password(..., record_success=False)`, then

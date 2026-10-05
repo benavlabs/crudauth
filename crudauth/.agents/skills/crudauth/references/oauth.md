@@ -52,7 +52,9 @@ link:
 ```
 
 `redirect_to` is where the callback sends the browser after login — **same-origin relative paths
-only** (open-redirect hardened).
+only** (open-redirect hardened). Without a safe one it falls back to `oauth_default_redirect`,
+which defaults to `redirect_base_url`; set it (e.g. `"/app/login"`) when the app isn't served at the
+root of `redirect_base_url`, which can't carry a path because it also builds the provider redirect URI.
 
 ## The callback: link or create
 
@@ -85,8 +87,8 @@ linking code is not) has to claim too. Linking a provider id onto an account by 
 making the password unusable, bumping `token_version` and terminating sessions hands the account to
 whoever registered the address first, whatever `email_verified` says.
 
-A disabled user gets no session (`account_inactive`). Failures redirect to `redirect_base_url` with
-`?error=<code>` (`oauth_failed`, `invalid_state`, `email_missing`, `email_unverified`,
+A disabled user gets no session (`account_inactive`). Failures redirect to `oauth_default_redirect` (default
+`redirect_base_url`) with `?error=<code>` (`oauth_failed`, `invalid_state`, `email_missing`, `email_unverified`,
 `email_too_long`, `provider_already_linked`, `account_inactive`), or return `400 {"detail": "<code>"}`
 in JSON mode — except `invalid_state`, which answers `400 {"detail": "Invalid or expired OAuth state"}`.
 `invalid_state` means the callback's state didn't match the browser's cookie or is no longer stored.

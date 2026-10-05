@@ -301,3 +301,81 @@ async def test_callback_userinfo_parse_error_redirects(client, monkeypatch) -> N
     assert r.status_code == 307
     assert "error=oauth_failed" in r.headers["location"]
     assert (await client.get("/me")).status_code == 401
+
+
+@pytest.fixture
+async def app_path_client(get_session, UserModel):
+    auth = CRUDAuth(
+        session=get_session,
+        user_model=UserModel,
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
+        transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+        oauth={"stub": OAuthCredentials(client_id="id", client_secret="sec")},
+        redirect_base_url="http://test",
+        oauth_default_redirect="/app/login",
+    )
+    app = FastAPI()
+    app.include_router(auth.router)
+    await auth.initialize()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        yield c
+    await auth.shutdown()
+
+
+async def test_a_failure_lands_on_the_default_redirect(app_path_client) -> None:
+    r = await app_path_client.get("/oauth/stub/callback?error=access_denied&state=whatever")
+    assert r.status_code == 307
+    assert r.headers["location"] == "/app/login?error=oauth_failed"
+
+
+async def test_an_unsafe_redirect_to_lands_on_the_default_redirect(app_path_client) -> None:
+    r = await app_path_client.get("/oauth/stub/authorize?redirect_to=https://evil.example/x")
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+
+    r = await app_path_client.get(f"/oauth/stub/callback?code=abc&state={state}")
+    assert r.headers["location"] == "/app/login"
+    assert (await app_path_client.get("/me")).status_code == 200
+
+
+async def test_a_safe_redirect_to_still_wins_over_the_default(app_path_client) -> None:
+    r = await app_path_client.get("/oauth/stub/authorize?redirect_to=/app/dashboard")
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+
+    r = await app_path_client.get(f"/oauth/stub/callback?code=abc&state={state}")
+    assert r.headers["location"] == "/app/dashboard"
+
+
+async def test_the_provider_redirect_uri_ignores_the_default_redirect(app_path_client) -> None:
+    r = await app_path_client.get("/oauth/stub/authorize")
+    query = parse_qs(urlparse(r.headers["location"]).query)
+    assert query["redirect_uri"] == ["http://test/oauth/stub/callback"]
+
+
+@pytest.mark.parametrize(
+    "target", ["//evil.example", "app/login", "javascript:alert(1)", "/\\evil"]
+)
+def test_an_unsafe_default_redirect_fails_fast(get_session, UserModel, target) -> None:
+    with pytest.raises(ValueError, match="oauth_default_redirect"):
+        CRUDAuth(
+            session=get_session,
+            user_model=UserModel,
+            SECRET_KEY="test-secret-key-0123456789-0123456789",
+            transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+            oauth={"stub": OAuthCredentials(client_id="id", client_secret="sec")},
+            redirect_base_url="http://test",
+            oauth_default_redirect=target,
+        )
+
+
+def test_an_absolute_default_redirect_is_accepted(get_session, UserModel) -> None:
+    CRUDAuth(
+        session=get_session,
+        user_model=UserModel,
+        SECRET_KEY="test-secret-key-0123456789-0123456789",
+        transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+        oauth={"stub": OAuthCredentials(client_id="id", client_secret="sec")},
+        redirect_base_url="http://api.test",
+        oauth_default_redirect="https://app.test/login",
+    )
