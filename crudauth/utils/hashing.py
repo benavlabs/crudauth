@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import functools
 import hashlib
+import logging
 import secrets
 import unicodedata
+from collections.abc import Callable, Sequence
 
 import bcrypt
 from fastapi.concurrency import run_in_threadpool
+
+logger = logging.getLogger("crudauth")
+
+PRE_HASH_LENGTH = 44
+"""Characters in crudauth's bcrypt input: a SHA-256 digest (32 bytes) in base64."""
+
+BCRYPT_INPUT_BYTES = 72
+"""The most of a password bcrypt has ever hashed: older libraries cut there, newer ones refuse more."""
 
 __all__ = [
     "normalize_password",
@@ -20,9 +31,17 @@ __all__ = [
     "verify_and_update_password",
     "verify_and_update_password_async",
     "dummy_verify_password",
+    "LegacyVerifier",
+    "verify_plain_bcrypt",
+    "verify_legacy_password",
+    "verify_legacy_password_async",
     "make_unusable_password",
     "is_unusable_password",
 ]
+
+
+LegacyVerifier = Callable[[str, str], bool]
+"""Checks a password against a hash another system wrote: ``(plain_password, hashed_password) -> bool``."""
 
 
 def _bcrypt_input(password: str) -> bytes:
@@ -224,3 +243,92 @@ def is_unusable_password(hashed_password: str) -> bool:
         ```
     """
     return not hashed_password or hashed_password.startswith("!")
+
+
+def verify_plain_bcrypt(plain_password: str, hashed_password: str) -> bool:
+    """A [LegacyVerifier][crudauth.utils.LegacyVerifier] for hashes made by plain bcrypt.
+
+    Plain bcrypt hashes the password itself, where crudauth hashes its SHA-256
+    digest, so a hash another library wrote with ``bcrypt.hashpw(password, salt)``
+    never matches crudauth's own check. Pass this in ``legacy_verifiers`` to accept
+    those hashes at login; each one is replaced with a crudauth hash the first time
+    its owner signs in.
+
+    Only the first 72 bytes of the password are compared, because that is all bcrypt
+    ever hashed: older libraries cut a longer password there silently, and newer ones
+    refuse it. Cutting the same way gives the answer the old system gave on any bcrypt
+    version, so a user with a long password migrates too, and their new crudauth hash
+    is made from the whole password. A value that isn't a bcrypt hash is a non-match.
+    This is for plain bcrypt only: a hasher that pre-hashed before bcrypt (passlib's
+    ``bcrypt_sha256``, Django's ``BCryptSHA256PasswordHasher``) needs a verifier of its own.
+
+    It refuses a password shaped like crudauth's own bcrypt input (44 characters of
+    base64 that decode to 32 bytes). crudauth stores ``bcrypt(base64(sha256(pw)))``,
+    which plain bcrypt would accept for that digest, so without the check an unsalted
+    SHA-256 of any user's password, leaked from somewhere else, would sign in as them.
+    A real password of exactly that shape is refused by this verifier too, which only
+    matters for an account still on its legacy hash.
+
+    Example:
+        ```python
+        from crudauth.utils import verify_plain_bcrypt
+
+        auth = CRUDAuth(..., legacy_verifiers=[verify_plain_bcrypt])
+        ```
+    """
+    if _looks_like_pre_hash(plain_password):
+        return False
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode()[:BCRYPT_INPUT_BYTES], hashed_password.encode()
+        )
+    except ValueError:
+        return False
+
+
+def _looks_like_pre_hash(value: str) -> bool:
+    """Whether ``value`` has the shape of crudauth's bcrypt input, a base64 SHA-256 digest."""
+    if len(value) != PRE_HASH_LENGTH:
+        return False
+    try:
+        return len(base64.b64decode(value, validate=True)) == hashlib.sha256().digest_size
+    except (binascii.Error, ValueError):
+        return False
+
+
+def verify_legacy_password(
+    verifiers: Sequence[LegacyVerifier], plain_password: str, hashed_password: str | None
+) -> bool:
+    """Whether any of ``verifiers`` accepts the password for this hash.
+
+    With no hash (an unknown user) every verifier still runs, against crudauth's
+    dummy hash, so a wrong password costs the same whether or not the account
+    exists. A verifier that raises counts as a non-match, and is logged so a broken
+    one doesn't look like every legacy user typing the wrong password.
+
+    A verifier must not accept crudauth's own hashes for anything but the user's real
+    password: crudauth's hashes are bcrypt too, and a check like plain bcrypt's would
+    accept the digest crudauth bcrypts (see [verify_plain_bcrypt]
+    [crudauth.utils.verify_plain_bcrypt]).
+    """
+    target = hashed_password or _dummy_hash()
+    matched = False
+    for verify in verifiers:
+        try:
+            matched = verify(plain_password, target) or matched
+        except Exception as error:
+            logger.warning(
+                "crudauth: legacy verifier %s raised %s; treated as a non-match",
+                getattr(verify, "__qualname__", repr(verify)),
+                type(error).__name__,
+            )
+    return matched and hashed_password is not None
+
+
+async def verify_legacy_password_async(
+    verifiers: Sequence[LegacyVerifier], plain_password: str, hashed_password: str | None
+) -> bool:
+    """[verify_legacy_password][crudauth.utils.hashing.verify_legacy_password] in a worker thread, off the event loop."""
+    return await run_in_threadpool(
+        verify_legacy_password, verifiers, plain_password, hashed_password
+    )

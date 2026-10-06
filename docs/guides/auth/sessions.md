@@ -72,6 +72,14 @@ On later requests the session transport reads `session_id`, validates it against
 slides its idle timeout forward, and (on unsafe methods) checks CSRF before returning the
 `Principal`.
 
+The store never holds the session id or the CSRF token themselves: each is kept under an HMAC of
+its value keyed with your `SECRET_KEY`. Whoever can read Redis can't sign in with what they read,
+and changing `SECRET_KEY` signs everyone out.
+
+Signing in again from a browser that still presents a session ends that session first. The
+browser drops the old cookie anyway, so it stays usable only to whoever copied it. Other
+browsers' sessions are untouched.
+
 <p align="center">
   <img src="../../assets/diagrams/session-model-light.png#only-light" alt="The browser holds a httpOnly session_id cookie and a JS-readable csrf_token cookie; the session_id is looked up in the server-side session store (memory or redis) which holds user_id, csrf_token and expiry; writes must echo csrf_token in the X-CSRF-Token header" width="100%">
   <img src="../../assets/diagrams/session-model-dark.png#only-dark" alt="The browser holds a httpOnly session_id cookie and a JS-readable csrf_token cookie; the session_id is looked up in the server-side session store (memory or redis) which holds user_id, csrf_token and expiry; writes must echo csrf_token in the X-CSRF-Token header" width="100%">
@@ -153,6 +161,48 @@ async def sign_out_all(user: Principal = Depends(auth.current_user())):
 
 `max_sessions_per_user` caps how many concurrent sessions a user can have; the oldest is
 evicted past the cap.
+
+## Session lifetime
+
+`session_timeout_minutes` (default 30) is an idle timeout: every authenticated request slides it
+forward, so a session in use never ends on its own. `absolute_timeout_hours` caps a session from
+sign-in, however active it stays, for an app that wants a periodic re-login:
+
+```python
+SessionTransport(session_timeout_minutes=30, absolute_timeout_hours=12)
+```
+
+It's unset by default.
+
+## Two apps side by side
+
+Two apps that both run CRUDAuth, an admin panel mounted beside the main app for instance, must not
+share a session namespace. On one Redis, the same storage prefix lets a session id from one app
+resolve in the other; in one browser, the same cookie name lets the second login overwrite the
+first. Give the embedded app its own names:
+
+```python
+SessionTransport(
+    cookie_name="admin_session",
+    csrf_cookie_name="admin_csrf",
+    storage_prefix="admin:session:",
+    csrf_storage_prefix="admin:csrf:",
+)
+```
+
+## Your own session store
+
+To keep sessions somewhere other than memory or Redis (a database table, Memcached), implement
+[`AbstractSessionStorage`](../../api/storage.md) and pass a store of sessions and one of CSRF
+tokens:
+
+```python
+SessionTransport(storage=DatabaseSessions(prefix="session:"), csrf_storage=DatabaseCSRF(prefix="csrf:"))
+```
+
+The stores carry their own prefix and expiration, so they can't be combined with `backend`,
+`redis_url`, `redis_client` or `storage_prefix`, and `csrf_storage` is required while CSRF is on.
+`auth.initialize()` and `auth.shutdown()` open and close them like the built-in ones.
 
 ## Backends and lifespan
 

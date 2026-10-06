@@ -330,3 +330,22 @@ async def test_authorize_is_rate_limited(get_session, UserModel) -> None:
     await auth.shutdown()
 
     assert statuses == [307, 307, 429]
+
+
+async def test_the_login_hook_names_the_oauth_session_by_its_public_handle(
+    get_session, UserModel, provider
+) -> None:
+    handles: list[str | None] = []
+    hooks = AuthHooks(
+        on_after_login=lambda user, *, request, context: handles.append(context.session_handle)
+    )
+    auth, app = _app(get_session, UserModel, hooks=hooks)
+    await auth.initialize()
+    provider.profile = {"id": "idp-handle", "email": "handle@x.com"}
+    async with _client(app) as browser:
+        await _sign_in(browser)
+        session_id = browser.cookies.get("session_id")
+    await auth.shutdown()
+
+    assert session_id is not None
+    assert handles == [auth.sessions.session_handle(session_id)]

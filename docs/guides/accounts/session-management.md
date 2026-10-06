@@ -48,8 +48,11 @@ async def sessions(request: Request, user: Principal = Depends(auth.current_user
 # [{ "id", "device", "ip", "created_at", "last_activity", "current" }, ...]
 ```
 
-`id` is `auth.sessions.session_handle(session_id)`, a SHA-256 of the session id. The session id
-is the cookie value, so it never goes in a response.
+`id` is `auth.sessions.session_handle(session_id)`, the key the session is stored under (an HMAC
+of the session id keyed with `SECRET_KEY`). The session id is the cookie value, so it never goes
+in a response, and the handle can't be turned back into it. A handle isn't a secret: anyone who
+can read the session store sees every handle, but without `SECRET_KEY` none of them becomes a
+cookie, and revoking by handle is limited to the owner's own sessions.
 
 ## Revoke one session
 

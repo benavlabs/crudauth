@@ -151,9 +151,7 @@ class SudoManager:
         def stamp(session: SessionData) -> None:
             session.metadata[SUDO_ELEVATED_UNTIL_META_KEY] = elevated_until.isoformat()
 
-        stamped = await self.session_manager.storage.modify(
-            session_id, SessionData, stamp, reset_expiration=False
-        )
+        stamped = await self.session_manager.modify_session(session_id, stamp)
         if stamped is None:
             raise ForbiddenException("Session no longer exists.")
 
@@ -178,7 +176,7 @@ class SudoManager:
         session_id = principal.metadata.get("session_id")
         if principal.transport != SessionTransport.name or not session_id:
             return False
-        session = await self.session_manager.storage.get(str(session_id), SessionData)
+        session = await self.session_manager.get_session(str(session_id))
         if session is None:
             return False
         stamp = session.metadata.get(SUDO_ELEVATED_UNTIL_META_KEY)
@@ -228,6 +226,4 @@ class SudoManager:
         def unstamp(session: SessionData) -> None:
             session.metadata.pop(SUDO_ELEVATED_UNTIL_META_KEY, None)
 
-        await self.session_manager.storage.modify(
-            session_id, SessionData, unstamp, reset_expiration=False
-        )
+        await self.session_manager.modify_session(session_id, unstamp)

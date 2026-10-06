@@ -17,10 +17,14 @@ from fastapi import APIRouter, Request, Response
 
 from .constants import DEFAULT_ALGORITHM
 from .exceptions import RateLimitException, UnauthorizedException
+from .hooks import HookContext
 from .principal import Principal
 from .utils import (
+    LegacyVerifier,
     get_client_ip,
+    get_password_hash_async,
     verify_and_update_password_async,
+    verify_legacy_password_async,
 )
 
 logger = logging.getLogger("crudauth")
@@ -83,6 +87,9 @@ class AuthRuntime:
         transports: Every configured transport, in precedence order.
         mfa: The [MfaService][crudauth.mfa.service.MfaService], or ``None`` when MFA
             isn't configured.
+        legacy_verifiers: Checks for password hashes another system wrote, tried at
+            login when crudauth's own check fails; a match is rehashed in crudauth's
+            format.
 
     Note:
         ``lockout`` is a single shared policy used by BOTH the session ``/login``
@@ -104,6 +111,7 @@ class AuthRuntime:
     redis_client: Any = None
     transports: list[Transport] = field(default_factory=list)
     mfa: "MfaService | None" = None
+    legacy_verifiers: tuple[LegacyVerifier, ...] = ()
 
     def clear_cookies(self, response: Response) -> None:
         """Expire the cookie credentials of every configured transport, for a logout."""
@@ -128,7 +136,12 @@ class AuthRuntime:
         user-enumeration oracle), and the disabled-account check. Returns the user
         row on success - the caller then establishes a session or mints a token.
         A stored hash made before Unicode normalization is replaced with a
-        normalized one on a successful login.
+        normalized one on a successful login, and so is a hash only one of the
+        ``legacy_verifiers`` accepts.
+
+        A refusal runs the ``on_lockout`` or ``on_login_failed`` hook before it
+        raises; both get the identifier as typed, which the hook must treat as
+        untrusted input.
 
         With ``record_success=False`` a correct password neither clears the lockout
         counters nor counts against them, for a login that still needs its second
@@ -151,21 +164,40 @@ class AuthRuntime:
             ```
         """
         ip = get_client_ip(request, self.trusted_proxy_hops)
+        context = HookContext(
+            ip_address=ip, user_agent=request.headers.get("user-agent"), request=request
+        )
         if self.lockout is not None:
             allowed, _, retry_after = await self.lockout.check_and_record(
                 ip, identifier, success=False
             )
             if not allowed:
+                await self.hooks.run_lockout(identifier, retry_after=retry_after, context=context)
                 raise RateLimitException(
                     "Too many login attempts. Try again later.", retry_after=retry_after
                 )
         user = await self.repo.resolve_login(db, identifier)
         hashed_password = None if user is None else self.repo.get(user, "hashed_password")
         verified, new_hash = await verify_and_update_password_async(password, hashed_password)
+        if not verified and self.legacy_verifiers:
+            verified = await verify_legacy_password_async(
+                self.legacy_verifiers, password, hashed_password
+            )
+            if verified:
+                new_hash = await get_password_hash_async(password)
         if user is None or not verified:
+            await self.hooks.run_login_failed(
+                identifier,
+                user=None if user is None else self.repo.to_dict(user),
+                reason="invalid_credentials",
+                context=context,
+            )
             raise UnauthorizedException("Incorrect username or password")
         if not self.repo.is_active(user):
             logger.warning("login denied: account disabled (user_id=%s)", self.repo.user_id(user))
+            await self.hooks.run_login_failed(
+                identifier, user=self.repo.to_dict(user), reason="inactive", context=context
+            )
             raise UnauthorizedException("Incorrect username or password")
         if new_hash is not None:
             await self.repo.update(db, user, {"hashed_password": new_hash})

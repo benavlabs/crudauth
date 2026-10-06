@@ -75,6 +75,7 @@ from .transports.bearer.transport import BearerTransport
 from .transports.session.management import build_session_management_router
 from .transports.session.manager import SessionManager
 from .transports.session.transport import SessionTransport
+from .utils import LegacyVerifier
 
 if TYPE_CHECKING:  # pragma: no cover
     from .ratelimit import RateLimiterBackend
@@ -142,6 +143,7 @@ class CRUDAuth:
         mfa: MfaConfig | None = None,
         warn_on_memory_backend: bool = True,
         password_policy: PasswordPolicy | None = None,
+        legacy_verifiers: Sequence[LegacyVerifier] | None = None,
     ):
         """Configure the auth surface.
 
@@ -261,6 +263,15 @@ class CRUDAuth:
             password_policy: The [PasswordPolicy][crudauth.password.PasswordPolicy] every
                 new password must meet on registration, set, change and reset. The
                 default requires at least 8 characters.
+            legacy_verifiers: Checks for password hashes another system wrote, for
+                an app moving its users onto crudauth. When crudauth's own check fails
+                at login, each runs in turn; a match signs the user in and replaces the
+                stored hash with a crudauth one, so it's needed only until every user
+                has signed in once. [verify_plain_bcrypt][crudauth.utils.verify_plain_bcrypt]
+                covers hashes made by plain bcrypt. Each verifier is
+                ``(plain_password, hashed_password) -> bool``, runs in a worker thread,
+                and runs for an unknown user too (against a dummy hash), so it can't
+                reveal which accounts exist.
 
         Raises:
             ValueError: If ``SECRET_KEY`` is empty; if ``oauth`` or ``sudo`` is
@@ -307,6 +318,7 @@ class CRUDAuth:
             rate_limiter=rate_limiter,
             lockout=lockout,
             trusted_proxy_hops=trusted_proxy_hops,
+            legacy_verifiers=tuple(legacy_verifiers or ()),
         )
         self._principals = PrincipalResolver(self.runtime)
         for transport in self.transports:
@@ -360,6 +372,7 @@ class CRUDAuth:
         rate_limiter: "RateLimiterBackend | None",
         lockout: LockoutConfig | None,
         trusted_proxy_hops: int,
+        legacy_verifiers: tuple[LegacyVerifier, ...],
     ) -> AuthRuntime:
         """The state transports and services share, before any transport is bound.
 
@@ -385,6 +398,7 @@ class CRUDAuth:
             trusted_proxy_hops=trusted_proxy_hops,
             redis_client=redis_client,
             transports=self.transports,
+            legacy_verifiers=legacy_verifiers,
         )
 
     def _build_lockout(

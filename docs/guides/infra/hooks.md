@@ -28,6 +28,8 @@ be lost, enqueue it from the hook rather than doing it inline.
 | Hook | Fires after | Receives |
 |---|---|---|
 | `on_after_register` | an account is created | `user, db, context` |
+| `on_login_failed` | a refused password login | `identifier, user, reason, context` |
+| `on_lockout` | a password login refused by the lockout | `identifier, retry_after, context` |
 | `on_after_login` | a successful login | `user, request, context` |
 | `on_after_logout` | a logout | `user, request, context` |
 | `on_after_recovery_verified` | recovery-factor verification confirm | `user, db, context` |
@@ -41,6 +43,13 @@ be lost, enqueue it from the hook rather than doing it inline.
 
 All hooks also receive a `context` keyword.
 
+`on_login_failed` gets the identifier as typed (untrusted input: escape it before it reaches a
+page), `user` (the account it named, or `None` when it named none) and `reason`
+(`"invalid_credentials"` or `"inactive"`). The response to the caller doesn't say which; the hook
+can, for an audit log or an alert. `on_lockout` gets the identifier and how many seconds the
+lockout has left. Both run on every password login (`/login`, `/token`, and
+`auth.authenticate_password`), before the refusal is raised.
+
 ## HookContext
 
 `context` carries ambient request info, so a hook can log or branch without re-deriving it:
@@ -52,6 +61,7 @@ All hooks also receive a `context` keyword.
 | `transport` | Which transport authenticated (`"session"`, `"bearer"`, ...). |
 | `request` | The FastAPI `Request`, when available. |
 | `extra` | A dict for flow-specific extras. |
+| `session_handle` | On a session login, the session's public handle, the same `id` `GET /sessions` lists. An audit log can name the session and match it to a later revocation without storing a credential. |
 
 ## Example: an audit log
 

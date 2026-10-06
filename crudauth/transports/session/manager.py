@@ -6,8 +6,10 @@ Decoupled from any global settings: every policy knob is a constructor argument.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import secrets
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -60,7 +62,20 @@ class SessionManager:
         session_cookie_name: str = SESSION_COOKIE_NAME,
         csrf_cookie_name: str = CSRF_COOKIE_NAME,
         trusted_proxy_hops: int = 0,
+        key_secret: str | None = None,
+        absolute_timeout_hours: int | None = None,
     ):
+        """Run sessions over ``session_storage``.
+
+        Args:
+            key_secret: When set, sessions and CSRF tokens are stored under an HMAC of
+                their id keyed with it, and the raw id is never written, so whoever can
+                read the store can't sign in with what they read. The session
+                transport passes the app's ``SECRET_KEY``; changing it signs everyone
+                out. ``None`` stores them under the raw id.
+            absolute_timeout_hours: The most a session may live from its creation,
+                however active it stays; ``None`` (default) leaves only the idle timeout.
+        """
         self.storage = session_storage
         self.csrf_storage = csrf_storage
         self.max_sessions = max_sessions_per_user
@@ -76,6 +91,32 @@ class SessionManager:
         self.session_cookie_name = session_cookie_name
         self.csrf_cookie_name = csrf_cookie_name
         self.trusted_proxy_hops = trusted_proxy_hops
+        self.key_secret = key_secret
+        self.absolute_timeout = (
+            timedelta(hours=absolute_timeout_hours) if absolute_timeout_hours is not None else None
+        )
+
+    # --- storage keys ----------------------------------------------------------
+    def _keyed(self, purpose: bytes, value: str) -> str:
+        if self.key_secret is None:
+            return value
+        return hmac.new(
+            self.key_secret.encode(), purpose + value.encode(), hashlib.sha256
+        ).hexdigest()
+
+    def _key(self, session_id: str) -> str:
+        """The storage key for a session id from a cookie."""
+        return self._keyed(b"session:", session_id)
+
+    def _csrf_key(self, token: str) -> str:
+        """The storage key for a CSRF token from a header."""
+        return self._keyed(b"csrf:", token)
+
+    def _handle_of(self, key: str) -> str:
+        """The public handle of a stored session: its key, which already can't be reversed."""
+        if self.key_secret is None:
+            return hashlib.sha256(key.encode()).hexdigest()
+        return key
 
     # --- timeout helpers -----------------------------------------------------
     def timeout_seconds_for(self, metadata: dict[str, Any] | None) -> int:
@@ -117,6 +158,9 @@ class SessionManager:
         device_info = parse_user_agent(user_agent).model_dump()
         ip_address = get_client_ip(request, self.trusted_proxy_hops)
 
+        presented = request.cookies.get(self.session_cookie_name)
+        if presented:
+            await self.terminate_session(presented, reason="replaced_by_login")
         await self._enforce_session_limit(user_id)
 
         session = SessionData(
@@ -133,10 +177,12 @@ class SessionManager:
             else self.timeout_seconds_for(session.metadata)
         )
         session_id = session.session_id
-        csrf_token = await self._generate_csrf_token(session_id, ttl)
+        key = self._key(session_id)
+        session.session_id = key
+        csrf_token = await self._generate_csrf_token(key, ttl)
         if csrf_token:
-            session.metadata[CSRF_TOKEN_ID_META_KEY] = csrf_token
-        await self.storage.create(session, session_id=session_id, expiration=ttl)
+            session.metadata[CSRF_TOKEN_ID_META_KEY] = self._csrf_key(csrf_token)
+        await self.storage.create(session, session_id=key, expiration=ttl)
         return session_id, csrf_token
 
     async def validate_session(
@@ -156,12 +202,16 @@ class SessionManager:
         """
         if not session_id:
             return None
-        session = await self.storage.get(session_id, SessionData)
+        key = self._key(session_id)
+        session = await self.storage.get(key, SessionData)
         if session is None:
             return None
         now = _utcnow()
         if self._is_idle_expired(session, now):
-            await self._terminate(session_id, session, reason="session_timeout")
+            await self._terminate(key, session, reason="session_timeout")
+            return None
+        if self.absolute_timeout is not None and session.created_at < now - self.absolute_timeout:
+            await self._terminate(key, session, reason="session_absolute_timeout")
             return None
         if not update_activity:
             return session
@@ -170,7 +220,7 @@ class SessionManager:
             current.last_activity = now
 
         ttl = self.timeout_seconds_for(session.metadata)
-        touched = await self.storage.modify(session_id, SessionData, touch, expiration=ttl)
+        touched = await self.storage.modify(key, SessionData, touch, expiration=ttl)
         if touched is None:
             return None
         csrf_id = touched.metadata.get(CSRF_TOKEN_ID_META_KEY)
@@ -191,9 +241,23 @@ class SessionManager:
         def rebind(current: SessionData) -> None:
             current.token_version = token_version
 
-        return (
-            await self.storage.modify(session_id, SessionData, rebind, reset_expiration=False)
-            is not None
+        return await self.modify_session(session_id, rebind) is not None
+
+    async def get_session(self, session_id: str) -> SessionData | None:
+        """The stored session for a session id from a cookie, without touching its activity."""
+        return await self.storage.get(self._key(session_id), SessionData)
+
+    async def modify_session(
+        self, session_id: str, change: Callable[[SessionData], None]
+    ) -> SessionData | None:
+        """Apply ``change`` to a live session without moving its expiry.
+
+        For values stored on the session (a sudo stamp, a rebound ``token_version``):
+        ``change`` may run more than once under a concurrent write, so it must only
+        set values. Returns the updated session, or ``None`` if it no longer exists.
+        """
+        return await self.storage.modify(
+            self._key(session_id), SessionData, change, reset_expiration=False
         )
 
     async def terminate_session(self, session_id: str, reason: str = "manual_termination") -> bool:
@@ -202,14 +266,15 @@ class SessionManager:
         Returns:
             ``True`` if a session was removed.
         """
-        session = await self.storage.get(session_id, SessionData)
+        key = self._key(session_id)
+        session = await self.storage.get(key, SessionData)
         if session is None:
             return False
-        return await self._terminate(session_id, session, reason)
+        return await self._terminate(key, session, reason)
 
-    async def _terminate(self, session_id: str, session: SessionData, reason: str) -> bool:
-        logger.debug("terminating session %s (reason=%s)", session_id, reason)
-        deleted = await self.storage.delete(session_id, user_id=session.user_id)
+    async def _terminate(self, key: str, session: SessionData, reason: str) -> bool:
+        logger.debug("terminating session %s (reason=%s)", self._handle_of(key), reason)
+        deleted = await self.storage.delete(key, user_id=session.user_id)
         csrf_id = session.metadata.get(CSRF_TOKEN_ID_META_KEY)
         if csrf_id and self.csrf_storage is not None:
             await self.csrf_storage.delete(csrf_id)
@@ -225,22 +290,23 @@ class SessionManager:
             [revoke_all][crudauth.transports.session.manager.SessionManager.revoke_all].
         """
         terminated = 0
+        excluded = self._key(exclude) if exclude else None
         for sid, session in await self._user_sessions(user_id):
-            if sid != exclude and await self._terminate(sid, session, reason):
+            if sid != excluded and await self._terminate(sid, session, reason):
                 terminated += 1
         return terminated
 
     # --- public device-management API (used by app endpoints) ----------------
-    @staticmethod
-    def session_handle(session_id: str) -> str:
-        """The public handle for a session: the SHA-256 hex digest of its id.
+    def session_handle(self, session_id: str) -> str:
+        """The public handle for a session: the key it's stored under, an HMAC of its id.
 
         The session id is the cookie value, so it must never reach a page or an
         API response. A handle identifies the session in a device list and can be
         passed to [revoke_by_handle][crudauth.transports.session.manager.SessionManager.revoke_by_handle],
-        but it can't be turned back into a cookie.
+        but it can't be turned back into a cookie. Without a ``key_secret`` it's the
+        SHA-256 hex digest of the id.
         """
-        return hashlib.sha256(session_id.encode()).hexdigest()
+        return self._handle_of(self._key(session_id))
 
     async def list_for_user(
         self, user_id: Any, current_session_id: str | None = None
@@ -267,15 +333,16 @@ class SessionManager:
             ```
         """
         out: list[dict[str, Any]] = []
+        current = self._key(current_session_id) if current_session_id else None
         for sid, session in await self._user_sessions(user_id):
             out.append(
                 {
-                    "id": self.session_handle(sid),
+                    "id": self._handle_of(sid),
                     "device": session.device_info,
                     "ip": session.ip_address,
                     "created_at": session.created_at,
                     "last_activity": session.last_activity,
-                    "current": sid == current_session_id,
+                    "current": sid == current,
                 }
             )
         return out
@@ -293,10 +360,11 @@ class SessionManager:
             ``True`` if a session was revoked, ``False`` if it didn't exist or
             failed the ownership check.
         """
-        session = await self.storage.get(session_id, SessionData)
+        key = self._key(session_id)
+        session = await self.storage.get(key, SessionData)
         if session is None or (owner_id is not None and str(session.user_id) != str(owner_id)):
             return False
-        return await self._terminate(session_id, session, reason="user_revoked")
+        return await self._terminate(key, session, reason="user_revoked")
 
     async def revoke_by_handle(self, handle: str, owner_id: Any) -> bool:
         """Revoke one of ``owner_id``'s sessions by its public handle.
@@ -311,7 +379,7 @@ class SessionManager:
             sessions has that handle (or the backend can't index by user).
         """
         for sid, session in await self._user_sessions(owner_id):
-            if self.session_handle(sid) == handle:
+            if hmac.compare_digest(self._handle_of(sid), handle):
                 return await self._terminate(sid, session, reason="user_revoked")
         return False
 
@@ -331,9 +399,8 @@ class SessionManager:
         )
 
     # --- CSRF ----------------------------------------------------------------
-    async def _generate_csrf_token(
-        self, session_id: str, expiration_seconds: int | None = None
-    ) -> str:
+    async def _generate_csrf_token(self, key: str, expiration_seconds: int | None = None) -> str:
+        """Issue a CSRF token bound to the session stored under ``key``; returns the raw token."""
         if self.csrf_storage is None:
             return ""
         ttl = (
@@ -342,12 +409,13 @@ class SessionManager:
             else int(self.session_timeout.total_seconds())
         )
         token = secrets.token_hex(self.csrf_token_bytes)
+        token_key = self._csrf_key(token)
         csrf = CSRFToken(
-            token=token,
-            session_id=session_id,
+            token=token_key,
+            session_id=key,
             expiry=_utcnow() + timedelta(seconds=ttl),
         )
-        await self.csrf_storage.create(csrf, session_id=token, expiration=ttl)
+        await self.csrf_storage.create(csrf, session_id=token_key, expiration=ttl)
         return token
 
     async def regenerate_csrf_token(
@@ -366,7 +434,8 @@ class SessionManager:
         """
         if self.csrf_storage is None:
             return ""
-        session = await self.storage.get(session_id, SessionData)
+        key = self._key(session_id)
+        session = await self.storage.get(key, SessionData)
         if session is None:
             return ""
         ttl = (
@@ -374,16 +443,17 @@ class SessionManager:
             if expiration_seconds is not None
             else self.timeout_seconds_for(session.metadata)
         )
-        new_token = await self._generate_csrf_token(session_id, ttl)
+        new_token = await self._generate_csrf_token(key, ttl)
+        new_key = self._csrf_key(new_token)
         replaced = ""
 
         def rotate(current: SessionData) -> None:
             nonlocal replaced
             replaced = current.metadata.get(CSRF_TOKEN_ID_META_KEY) or ""
-            current.metadata[CSRF_TOKEN_ID_META_KEY] = new_token
+            current.metadata[CSRF_TOKEN_ID_META_KEY] = new_key
 
-        if await self.storage.modify(session_id, SessionData, rotate, expiration=ttl) is None:
-            await self.csrf_storage.delete(new_token)
+        if await self.storage.modify(key, SessionData, rotate, expiration=ttl) is None:
+            await self.csrf_storage.delete(new_key)
             return ""
         if replaced:
             await self.csrf_storage.delete(replaced)
@@ -401,8 +471,8 @@ class SessionManager:
             return True
         if not session_id or not csrf_token:
             return False
-        data = await self.csrf_storage.get(csrf_token, CSRFToken)
-        if data is None or data.session_id != session_id:
+        data = await self.csrf_storage.get(self._csrf_key(csrf_token), CSRFToken)
+        if data is None or not hmac.compare_digest(data.session_id, self._key(session_id)):
             return False
         return True
 

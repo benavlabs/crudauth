@@ -21,18 +21,22 @@ from ...hooks import HookContext
 from ...principal import Principal
 from ...ratelimit.config import LockoutConfig, LoginSuccessClears
 from ...storage import get_session_storage
+from ...storage.base import AbstractSessionStorage
 from ...storage.backends.redis import redis_client_from_url
-from ...storage.constants import BACKEND_MEMORY, BACKEND_REDIS
+from ...storage.constants import BACKEND_CUSTOM, BACKEND_MEMORY, BACKEND_REDIS
 from ...utils import get_client_ip
 from .constants import (
+    CSRF_COOKIE_NAME,
     CSRF_HEADER_NAME,
     CSRF_STORAGE_PREFIX,
     REMEMBER_ME_META_KEY,
     SAFE_METHODS,
+    SESSION_COOKIE_NAME,
     SESSION_STORAGE_PREFIX,
 )
 from .manager import SessionManager
 from .routes import build_session_routes
+from .schemas import CSRFToken, SessionData
 
 __all__ = ["SessionTransport"]
 
@@ -55,7 +59,28 @@ class SessionTransport(Transport):
             ``CRUDAuth``'s. The caller owns it, so ``auth.shutdown()`` doesn't close it.
             Mutually exclusive with ``redis_url``.
         csrf: Enforce the synchronizer-token header on unsafe methods (default ``True``).
+        absolute_timeout_hours: The most a session may live from sign-in, however active it
+            stays. ``None`` (default) leaves only the idle timeout, so a session kept busy
+            never ends; set it to force a periodic re-login.
         cookies: Per-transport [CookieConfig][crudauth.core.CookieConfig] override.
+        cookie_name: The session cookie's name (default ``"session_id"``).
+        csrf_cookie_name: The CSRF cookie's name (default ``"csrf_token"``).
+        storage_prefix: The key prefix sessions are stored under (default ``"session:"``).
+        csrf_storage_prefix: The key prefix CSRF tokens are stored under (default ``"csrf:"``).
+            Two apps that each run crudauth must not share all four: on one Redis, the same
+            prefix lets one app's session id resolve in the other, and in one browser the same
+            cookie name lets the second login overwrite the first. Give an embedded app (an
+            admin panel mounted beside the main app) its own, e.g.
+            ``SessionTransport(cookie_name="admin_session", csrf_cookie_name="admin_csrf",
+            storage_prefix="admin:session:", csrf_storage_prefix="admin:csrf:")``.
+        storage: A session store you built, instead of the memory or Redis one this
+            transport would make: any [AbstractSessionStorage][crudauth.storage.base.AbstractSessionStorage]
+            of [SessionData][crudauth.transports.session.schemas.SessionData] (a database
+            table, Memcached, ...). It carries its own key prefix and expiration, so it can't be
+            combined with ``backend``, ``redis_url``, ``redis_client`` or ``storage_prefix``.
+            ``auth.initialize()`` and ``auth.shutdown()`` open and close it like the built-in ones.
+        csrf_storage: The matching store of [CSRFToken][crudauth.transports.session.schemas.CSRFToken]
+            rows, required with ``storage`` while ``csrf`` is on.
         login_max_attempts: The login lockout's ``max_attempts``.
         login_attempt_window_seconds: The login lockout's ``attempt_window_seconds``.
         login_lockout_base_seconds: The login lockout's ``lockout_base_seconds``.
@@ -91,9 +116,16 @@ class SessionTransport(Transport):
         csrf: bool = True,
         max_sessions_per_user: int = DEFAULT_MAX_SESSIONS_PER_USER,
         session_timeout_minutes: int = DEFAULT_SESSION_TIMEOUT_MINUTES,
+        absolute_timeout_hours: int | None = None,
         remember_me_days: int = DEFAULT_REMEMBER_ME_DAYS,
         cleanup_interval_minutes: int = DEFAULT_CLEANUP_INTERVAL_MINUTES,
         cookies: CookieConfig | None = None,
+        cookie_name: str = SESSION_COOKIE_NAME,
+        csrf_cookie_name: str = CSRF_COOKIE_NAME,
+        storage_prefix: str = SESSION_STORAGE_PREFIX,
+        csrf_storage_prefix: str = CSRF_STORAGE_PREFIX,
+        storage: AbstractSessionStorage[SessionData] | None = None,
+        csrf_storage: AbstractSessionStorage[CSRFToken] | None = None,
         login_max_attempts: int | None = None,
         login_attempt_window_seconds: int | None = None,
         login_lockout_base_seconds: int | None = None,
@@ -103,6 +135,22 @@ class SessionTransport(Transport):
     ):
         if redis_url is not None and redis_client is not None:
             raise ValueError("redis_url and redis_client are mutually exclusive")
+        if cookie_name == csrf_cookie_name:
+            raise ValueError("cookie_name and csrf_cookie_name must differ")
+        if storage_prefix == csrf_storage_prefix:
+            raise ValueError("storage_prefix and csrf_storage_prefix must differ")
+        if storage is not None:
+            if backend is not None or redis_url is not None or redis_client is not None:
+                raise ValueError(
+                    "storage can't be combined with backend, redis_url or redis_client: "
+                    "the store you pass decides where sessions live"
+                )
+            if storage_prefix != SESSION_STORAGE_PREFIX:
+                raise ValueError("storage carries its own key prefix; drop storage_prefix")
+            if csrf and csrf_storage is None:
+                raise ValueError("storage needs a csrf_storage while csrf is on")
+        elif csrf_storage is not None:
+            raise ValueError("csrf_storage is only used together with storage")
         backend = backend.lower() if backend else None
         if backend == BACKEND_MEMORY and (redis_url is not None or redis_client is not None):
             raise ValueError("backend='memory' can't be combined with redis_url or redis_client")
@@ -116,9 +164,16 @@ class SessionTransport(Transport):
         self.csrf_enabled = csrf
         self.max_sessions_per_user = max_sessions_per_user
         self.session_timeout_minutes = session_timeout_minutes
+        self.absolute_timeout_hours = absolute_timeout_hours
         self.remember_me_days = remember_me_days
         self.cleanup_interval_minutes = cleanup_interval_minutes
         self._cookie_override = cookies
+        self.cookie_name = cookie_name
+        self.csrf_cookie_name = csrf_cookie_name
+        self.storage_prefix = storage_prefix
+        self.csrf_storage_prefix = csrf_storage_prefix
+        self._storage = storage
+        self._csrf_storage = csrf_storage
         lockout_overrides: dict[str, Any] = {
             "max_attempts": login_max_attempts,
             "attempt_window_seconds": login_attempt_window_seconds,
@@ -155,6 +210,12 @@ class SessionTransport(Transport):
                 "protection). Use 'lax' or 'strict'."
             )
         timeout_seconds = self.session_timeout_minutes * SECONDS_PER_MINUTE
+        if self._storage is not None:
+            self.backend, self.redis_client = BACKEND_CUSTOM, None
+            self.manager = self._build_manager(
+                runtime, cookies, self._storage, self._csrf_storage if self.csrf_enabled else None
+            )
+            return
         client = self._redis_client
         if client is None and self._redis_url is not None:
             client = self._owned_client = redis_client_from_url(self._redis_url)
@@ -164,22 +225,30 @@ class SessionTransport(Transport):
         if backend == BACKEND_REDIS and client is None:
             client = self._owned_client = redis_client_from_url()
         self.backend, self.redis_client = backend, client
-        session_storage = get_session_storage(
+        session_storage: AbstractSessionStorage[SessionData] = get_session_storage(
             self.backend,
-            prefix=SESSION_STORAGE_PREFIX,
+            prefix=self.storage_prefix,
             expiration=timeout_seconds,
             client=self.redis_client,
         )
-        csrf_storage = None
+        csrf_storage: AbstractSessionStorage[CSRFToken] | None = None
         if self.csrf_enabled:
             csrf_storage = get_session_storage(
                 self.backend,
-                prefix=CSRF_STORAGE_PREFIX,
+                prefix=self.csrf_storage_prefix,
                 expiration=timeout_seconds,
                 client=self.redis_client,
             )
+        self.manager = self._build_manager(runtime, cookies, session_storage, csrf_storage)
 
-        self.manager = SessionManager(
+    def _build_manager(
+        self,
+        runtime: AuthRuntime,
+        cookies: CookieConfig,
+        session_storage: AbstractSessionStorage[SessionData],
+        csrf_storage: AbstractSessionStorage[CSRFToken] | None,
+    ) -> SessionManager:
+        return SessionManager(
             session_storage,
             csrf_storage=csrf_storage,
             max_sessions_per_user=self.max_sessions_per_user,
@@ -190,7 +259,11 @@ class SessionTransport(Transport):
             cookie_secure=cookies.secure,
             cookie_samesite=cookies.samesite,
             cookie_path=cookies.path,
+            session_cookie_name=self.cookie_name,
+            csrf_cookie_name=self.csrf_cookie_name,
             trusted_proxy_hops=runtime.trusted_proxy_hops,
+            key_secret=runtime.secret_key,
+            absolute_timeout_hours=self.absolute_timeout_hours,
         )
 
     async def initialize(self) -> None:
@@ -311,6 +384,7 @@ class SessionTransport(Transport):
                 user_agent=request.headers.get("user-agent"),
                 transport=metadata.get("login_type", self.name),
                 request=request,
+                session_handle=self.manager.session_handle(session_id),
             ),
         )
         return {

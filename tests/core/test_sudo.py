@@ -15,7 +15,6 @@ from crudauth.principal import Principal
 from crudauth.repository import UserRepository
 from crudauth.transports.bearer.transport import BearerTransport
 from crudauth.transports.session.constants import SUDO_ELEVATED_UNTIL_META_KEY
-from crudauth.transports.session.schemas import SessionData
 from crudauth.utils import get_password_hash, make_unusable_password
 
 SECRET = "test-secret-key-0123456789-0123456789"
@@ -107,9 +106,9 @@ async def test_stamp_expiry_drops_elevation(get_session, UserModel, sessionmaker
         h = {"X-CSRF-Token": csrf}
         await c.post("/sudo", json={"password": PASSWORD}, headers=h)
         # rewrite the stamp into the past (an absolute expiry, not sliding)
-        session = await auth.sessions.storage.get(sid, SessionData)
+        session = await auth.sessions.get_session(sid)
         session.metadata[SUDO_ELEVATED_UNTIL_META_KEY] = "2000-01-01T00:00:00+00:00"
-        await auth.sessions.storage.update(sid, session)
+        await auth.sessions.storage.update(auth.sessions.session_handle(sid), session)
         assert (await c.get("/sudo-state")).json()["elevated"] is False
         assert (await c.post("/danger", headers=h)).status_code == 403
     await auth.shutdown()

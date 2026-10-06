@@ -254,7 +254,11 @@ def build_oauth_router(
         await runtime.hooks.run_after_login(
             runtime.repo.to_dict(user),
             request=request,
-            context=HookContext(transport="oauth", request=request),
+            context=HookContext(
+                transport="oauth",
+                request=request,
+                session_handle=session_manager.session_handle(session_id),
+            ),
         )
         if response_mode == "json":
             result = JSONResponse(
