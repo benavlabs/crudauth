@@ -20,6 +20,7 @@ from ..provisioning import NewUserContext, NewUserFields, resolve_new_user_field
 from ..repository import UserRepository
 from ..utils import canonical_email, make_unusable_password
 from .constants import (
+    ACCOUNT_INACTIVE,
     EMAIL_MISSING,
     EMAIL_TOO_LONG,
     EMAIL_UNVERIFIED,
@@ -85,7 +86,9 @@ class OAuthAccountService:
             OAuthAccountException: When the provider gives no email, an
                 unverified email, an email longer than the ``email`` column, or
                 the matching account is already linked to a different account
-                of the same provider.
+                of the same provider, or is inactive. An inactive account is
+                refused before anything is written to it: it is neither linked
+                nor claimed.
 
         Note:
             Only a verified provider email links or creates an account. Linking
@@ -96,6 +99,7 @@ class OAuthAccountService:
         """
         user = await self.repo.get_by_oauth(db, info.provider, info.provider_user_id)
         if user is not None:
+            self._refuse_inactive(user)
             return user, False
 
         if not info.email:
@@ -113,6 +117,7 @@ class OAuthAccountService:
 
         existing = await self.repo.get_by_email(db, info.email)
         if existing is not None:
+            self._refuse_inactive(existing)
             return await self._link(existing, info, db), False
 
         limit = self.repo.exceeds_length("email", canonical_email(info.email))
@@ -123,6 +128,10 @@ class OAuthAccountService:
                 "this app accepts.",
             )
         return await self._create_user(info, db), True
+
+    def _refuse_inactive(self, user: Any) -> None:
+        if not self.repo.is_active(user):
+            raise OAuthAccountException(ACCOUNT_INACTIVE, "This account is disabled.")
 
     async def _link(self, user: Any, info: OAuthUserInfo, db: AsyncSession) -> Any:
         if self.repo.get(user, f"{info.provider}_id") is not None:

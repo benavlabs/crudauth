@@ -5,6 +5,29 @@ breaking changes; those are called out explicitly.
 
 ___
 
+## 0.7.4 - 2026-10-05
+
+An OAuth sign-in on a disabled account was refused, but only after the account had been linked to
+the provider, and claimed if its email was unverified. It is now refused before anything is
+written. No breaking changes.
+
+#### Fixed
+- **An inactive account is refused before linking.** `OAuthAccountService.get_or_create_user` now
+  raises `OAuthAccountException` with `account_inactive` when the account it resolves, by provider
+  id or by email, has `is_active` false. Before, an email match ran the link first: the provider id
+  was written onto the account and, when its email was unverified, the account was claimed (password
+  made unusable, MFA removed, `token_version` bumped, sessions ended, email marked verified). The
+  callback then reported `account_inactive`, so the user saw the refusal but the account had
+  already changed. An app that disables an account to keep it as it was, or soft-deletes users
+  behind an `is_active` property, now gets that. An app calling `get_or_create_user` from its own
+  callback gets the exception instead of the user.
+
+#### Documentation
+- The OAuth guide says nothing is written to a refused account, and shows how a soft-deleting app
+  maps its flag onto `is_active` with a property.
+
+___
+
 ## 0.7.3 - 2026-10-05
 
 An app that isn't served at the root of `redirect_base_url` can now say where a redirect-mode OAuth
