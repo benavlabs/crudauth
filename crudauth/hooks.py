@@ -24,13 +24,19 @@ Hook = Callable[..., Optional[Awaitable[None]]]
 
 @dataclass
 class HookContext:
-    """Ambient request/identity info passed to hooks as ``context=``."""
+    """Ambient request/identity info passed to hooks as ``context=``.
+
+    ``session_handle`` is set on a session login: the same public, non-reversible
+    handle ``GET /sessions`` lists, so an audit log can name the session that was
+    created (and later match it to a revocation) without storing a credential.
+    """
 
     ip_address: str | None = None
     user_agent: str | None = None
     transport: str | None = None
     request: "Request | None" = None
     extra: dict[str, Any] | None = None
+    session_handle: str | None = None
 
 
 async def _run_best_effort(name: str, hook: Hook | None, *args: Any, **kwargs: Any) -> None:
@@ -67,6 +73,8 @@ class AuthHooks:
     """
 
     on_after_register: Hook | None = None
+    on_login_failed: Hook | None = None
+    on_lockout: Hook | None = None
     on_after_login: Hook | None = None
     on_after_logout: Hook | None = None
     on_after_recovery_verified: Hook | None = None
@@ -81,6 +89,30 @@ class AuthHooks:
     async def run_after_register(self, user: dict, *, db: Any, context: HookContext) -> None:
         await _run_best_effort(
             "on_after_register", self.on_after_register, user, db=db, context=context
+        )
+
+    async def run_login_failed(
+        self, identifier: str, *, user: dict | None, reason: str, context: HookContext
+    ) -> None:
+        """A password login was refused: ``reason`` is ``"invalid_credentials"`` or ``"inactive"``.
+
+        ``user`` is the account the identifier resolved to, or ``None`` when it named
+        none. The caller's response doesn't distinguish the two; this hook can, for an
+        audit log.
+        """
+        await _run_best_effort(
+            "on_login_failed",
+            self.on_login_failed,
+            identifier,
+            user=user,
+            reason=reason,
+            context=context,
+        )
+
+    async def run_lockout(self, identifier: str, *, retry_after: int, context: HookContext) -> None:
+        """A password login was refused because the lockout is engaged for this IP or identifier."""
+        await _run_best_effort(
+            "on_lockout", self.on_lockout, identifier, retry_after=retry_after, context=context
         )
 
     async def run_after_login(self, user: dict, *, request: Any, context: HookContext) -> None:

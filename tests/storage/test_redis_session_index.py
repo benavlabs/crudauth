@@ -51,7 +51,7 @@ async def test_logout_all_during_a_login_leaves_the_new_session_revocable(
 
     assert revoked_mid_login == [0]
     assert await manager.validate_session(session_id, update_activity=True) is not None
-    assert session_id in await manager.storage.get_user_sessions(7)
+    assert manager.session_handle(session_id) in await manager.storage.get_user_sessions(7)
     assert await manager.revoke_all(7) == 1
     assert await manager.validate_session(session_id, update_activity=False) is None
 
@@ -177,5 +177,5 @@ async def test_activity_puts_a_session_back_into_a_lost_index(get_session, UserM
 
     await manager.validate_session(session_id, update_activity=True)
 
-    assert session_id in await manager.storage.get_user_sessions(11)
+    assert manager.session_handle(session_id) in await manager.storage.get_user_sessions(11)
     assert await manager.revoke_all(11) == 1

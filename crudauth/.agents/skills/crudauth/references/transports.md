@@ -18,6 +18,16 @@ session cookie. Sessions and CSRF follow `CRUDAuth(redis_url=...)` / `CRUDAuth(r
 
 - Cookies are `secure=True` by default — serve over HTTPS. A session cookie may **never** be
   `SameSite=None` (rejected at construction).
+- Sessions and CSRF tokens are stored under an HMAC of their value keyed with `SECRET_KEY`, never
+  the raw id; rotating `SECRET_KEY` signs everyone out. Signing in again ends the session the
+  browser presented.
+- `session_timeout_minutes` is an idle timeout; `absolute_timeout_hours=N` also caps a session from
+  sign-in.
+- Two apps on CRUDAuth side by side (an admin panel beside the main app) each need their own
+  `cookie_name`, `csrf_cookie_name`, `storage_prefix` and `csrf_storage_prefix`, or one's session
+  resolves in the other on a shared Redis.
+- `storage=` / `csrf_storage=` take stores you built (any `AbstractSessionStorage`), instead of
+  memory or Redis; not combinable with `backend`, `redis_url`, `redis_client` or `storage_prefix`.
 
 ## BearerTransport (API / mobile / CLI)
 

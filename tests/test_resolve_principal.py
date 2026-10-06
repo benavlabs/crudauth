@@ -12,7 +12,6 @@ from crudauth import CookieConfig, CRUDAuth, Principal, SessionTransport
 from crudauth.core import AuthContext, Transport
 from crudauth.exceptions import UnauthorizedException
 from crudauth.transports.bearer.transport import BearerTransport
-from crudauth.transports.session.schemas import SessionData
 
 SECRET = "test-secret-key-0123456789-0123456789"
 
@@ -181,10 +180,10 @@ async def test_route_updates_session_activity_after_middleware_resolution(get_se
     ) as client:
         await _register_and_login(client)
         session_id = client.cookies.get("session_id")
-        before = await auth.sessions.storage.get(session_id, SessionData)
+        before = await auth.sessions.get_session(session_id)
         await asyncio.sleep(0.01)
         assert (await client.get("/me")).status_code == 200
-        after = await auth.sessions.storage.get(session_id, SessionData)
+        after = await auth.sessions.get_session(session_id)
     await auth.shutdown()
     assert after.last_activity > before.last_activity
 

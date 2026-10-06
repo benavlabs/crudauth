@@ -406,9 +406,9 @@ async def test_expired_sessions_are_pruned_from_the_user_index(get_session, User
     manager = auth.sessions
     expired, _ = await manager.create_session(_request(), user_id=5)
     live, _ = await manager.create_session(_request(), user_id=5)
-    await client.delete(f"session:{expired}")
+    await client.delete(f"session:{manager.session_handle(expired)}")
 
     listed = await manager.list_for_user(5)
 
     assert [row["id"] for row in listed] == [manager.session_handle(live)]
-    assert await manager.storage.get_user_sessions(5) == [live]
+    assert await manager.storage.get_user_sessions(5) == [manager.session_handle(live)]

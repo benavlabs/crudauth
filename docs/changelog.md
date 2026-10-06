@@ -5,6 +5,64 @@ breaking changes; those are called out explicitly.
 
 ___
 
+## 0.8.0 - 2026-10-06
+
+What an app needs to move its users onto CRUDAuth from its own auth, and to run beside another
+CRUDAuth app, written for CRUDAdmin's move off its own session layer: old password hashes that
+still sign in, sessions namespaced per app, sessions kept in a store you supply, and hooks for
+the logins that fail. Sessions are also stored as HMACs of their ids now, can be capped from
+sign-in, and end when the same browser signs in again. Breaking: deploying it signs every user
+out once.
+
+#### Added
+- **`CRUDAuth(legacy_verifiers=[...])`**, checks for password hashes another system wrote, tried
+  at login when CRUDAuth's own check fails. A match signs the user in and replaces the stored hash
+  with a CRUDAuth one, so the option is needed only until every user has signed in once.
+  `crudauth.utils.verify_plain_bcrypt` covers hashes made by plain bcrypt, and refuses a password
+  shaped like crudauth's own bcrypt input (the base64 SHA-256 digest), which plain bcrypt would
+  otherwise accept against a crudauth hash. It compares the first 72 bytes of the password, all
+  bcrypt ever hashed, so a long legacy password migrates the same on bcrypt 4 and 5. The verifiers
+  run for an unknown user too, against a
+  dummy hash, so a wrong password costs the same whether or not the account exists; one that
+  raises is logged and counts as a non-match.
+- **`SessionTransport(cookie_name=, csrf_cookie_name=, storage_prefix=, csrf_storage_prefix=)`**,
+  so two CRUDAuth apps can share a Redis and a browser. With the defaults, an admin panel and the
+  app beside it read one key space, and a session from one resolved in the other.
+- **`SessionTransport(storage=, csrf_storage=)`**, session and CSRF stores you built (any
+  `AbstractSessionStorage`), in place of the memory or Redis ones.
+- **`SessionTransport(absolute_timeout_hours=)`**, the most a session may live from sign-in however
+  active it stays. Unset by default, which keeps the idle timeout as the only one.
+- **`AuthHooks(on_login_failed=, on_lockout=)`**, run by every password login before it refuses:
+  the identifier as typed, the account it named (or `None`), and `"invalid_credentials"` or
+  `"inactive"`; or the identifier and the lockout's remaining seconds.
+- **`HookContext.session_handle`**, the session's public handle on a session or OAuth login, so an
+  audit log can name the session without storing a credential.
+- **`SessionManager.get_session` and `modify_session`**, for code that reads or stamps a session by
+  its cookie value.
+
+#### Security
+- **Session ids and CSRF tokens are no longer stored.** Each is kept under an HMAC of its value
+  keyed with `SECRET_KEY`, and the stored session no longer carries its id, so read access to
+  Redis no longer yields a working session.
+- **Signing in again ends the session the browser presented.** The browser drops the old cookie,
+  so it stayed valid only for whoever had copied it.
+
+#### Breaking changes
+- **Deploying 0.8.0 signs every user out once.** Sessions written by 0.7 are stored under their
+  raw id and are no longer found. Changing `SECRET_KEY` does the same from now on.
+- **`SessionManager.session_handle` is an instance method**, and a handle is now the session's
+  storage key rather than the SHA-256 of its id. `auth.sessions.session_handle(session_id)` keeps
+  working; calling it on the class doesn't, and stored handles from 0.7 no longer match.
+- **A second login from the same browser revokes the first session.** An app that relied on the
+  old session surviving a re-login in the same browser has to stop.
+
+#### Documentation
+- The sessions guide covers two apps side by side, your own session store, the session lifetime,
+  and what the store holds. The passwords guide covers moving users from another system, and the
+  hooks guide the two new hooks and `session_handle`.
+
+___
+
 ## 0.7.5 - 2026-10-06
 
 The email flows now treat a disabled account the way 0.7.4 made OAuth treat it: as one that isn't

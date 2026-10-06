@@ -5,6 +5,8 @@ from __future__ import annotations
 # Backend selectors accepted by ``get_session_storage``.
 BACKEND_MEMORY = "memory"
 BACKEND_REDIS = "redis"
+# Sessions held in a store the app passed to SessionTransport(storage=...).
+BACKEND_CUSTOM = "custom"
 
 # Default key namespace prefix for stored values.
 DEFAULT_STORAGE_PREFIX = "session:"

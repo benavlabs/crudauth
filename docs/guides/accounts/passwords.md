@@ -45,6 +45,39 @@ await auth.repo.update(
 )
 ```
 
+### Moving users from another system
+
+Hashes another library wrote don't verify against crudauth's scheme. Plain bcrypt, for instance,
+hashes the password itself where crudauth hashes its SHA-256 digest. Pass checks for those hashes
+as `legacy_verifiers`, and a user signs in with their old password once, after which their stored
+hash is a crudauth one:
+
+```python
+from crudauth.utils import verify_plain_bcrypt
+
+auth = CRUDAuth(..., legacy_verifiers=[verify_plain_bcrypt])
+```
+
+They run only when crudauth's own check fails, at login, and a match is rehashed on the spot.
+A verifier is any `(plain_password, hashed_password) -> bool`, so a hash of another kind
+(argon2, PBKDF2, a framework's own format) needs only its check. Each runs in a worker thread,
+and for an unknown user each still runs against a dummy hash, so a wrong password costs the same
+whether or not the account exists; a verifier that raises counts as a non-match and is logged on
+the `crudauth` logger. Once every user has signed in since the move, the option can go.
+
+A verifier also runs against users already on a crudauth hash (the formats can't be told apart),
+so it must not accept crudauth's hashes for anything but the real password. crudauth stores
+bcrypt of the password's base64 SHA-256 digest, which a plain bcrypt check would accept for that
+digest: an unsalted SHA-256 of a reused password, leaked elsewhere, would sign in. That's why
+`verify_plain_bcrypt` refuses any password shaped like that digest (44 characters of base64 that
+decode to 32 bytes); write the same refusal into a verifier of your own that checks bcrypt.
+
+`verify_plain_bcrypt` compares only the first 72 bytes of the password, because that's all bcrypt
+ever hashed: older libraries cut a longer password there silently and newer ones refuse it. So a
+user whose password is longer migrates on any bcrypt version, and their new hash covers the whole
+password. It's for plain bcrypt only; a hasher that pre-hashed before bcrypt (passlib's
+`bcrypt_sha256`, Django's `BCryptSHA256PasswordHasher`) needs its own verifier.
+
 `get_password_hash` and `verify_password` do the same work synchronously, for scripts and sync
 code. `crudauth.utils.verify_and_update_password_async` also returns the replacement hash for a
 pre-normalization match, for a login you verify yourself instead of through
