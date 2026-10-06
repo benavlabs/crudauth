@@ -20,6 +20,7 @@ from crudauth.ratelimit import (
     RateLimit,
     RedisBackend,
 )
+from crudauth.ratelimit import base as ratelimit_base
 from crudauth.ratelimit.constants import LOCKOUT_NAMESPACE
 from crudauth.utils import client_ip_key, get_client_ip
 
@@ -121,7 +122,11 @@ async def test_ipv6_addresses_in_one_64_share_the_lockout() -> None:
     assert results == [True, True, True, False]
 
 
-async def test_an_ip_rate_limit_is_shared_across_an_ipv6_64(get_session, UserModel) -> None:
+async def test_an_ip_rate_limit_is_shared_across_an_ipv6_64(
+    get_session: Any, UserModel: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The window is keyed by wall-clock time; pin it so the requests can't straddle two windows.
+    monkeypatch.setattr(ratelimit_base.time, "time", lambda: 1_800_000_000.0)
     auth = CRUDAuth(
         session=get_session, user_model=UserModel, SECRET_KEY=SECRET, trusted_proxy_hops=1
     )

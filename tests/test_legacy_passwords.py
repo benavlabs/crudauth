@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
 from typing import Any
 
 import bcrypt
@@ -14,6 +12,7 @@ from fastapi import FastAPI
 from crudauth import AuthHooks, CookieConfig, CRUDAuth, SessionTransport
 from crudauth.repository import UserRepository
 from crudauth.utils import get_password_hash, verify_password, verify_plain_bcrypt
+from crudauth.utils.hashing import _bcrypt_input
 
 SECRET = "test-secret-key-0123456789-0123456789"
 PASSWORD = "legacy-pass-123"
@@ -348,7 +347,7 @@ async def test_the_digest_crudauth_hashes_is_not_a_second_password(
     auth, app = _app(get_session, UserModel, legacy_verifiers=[verify_plain_bcrypt])
     await auth.initialize()
     await _user(sessionmaker, UserModel, hashed_password=get_password_hash(PASSWORD))
-    digest = base64.b64encode(hashlib.sha256(PASSWORD.encode()).digest()).decode()
+    digest = _bcrypt_input(PASSWORD).decode()
 
     response = await _login(app, password=digest)
     await auth.shutdown()
@@ -357,7 +356,7 @@ async def test_the_digest_crudauth_hashes_is_not_a_second_password(
 
 
 def test_verify_plain_bcrypt_refuses_crudauths_own_pre_hash() -> None:
-    digest = base64.b64encode(hashlib.sha256(PASSWORD.encode()).digest()).decode()
+    digest = _bcrypt_input(PASSWORD).decode()
 
     assert verify_plain_bcrypt(digest, get_password_hash(PASSWORD)) is False
     assert verify_plain_bcrypt(digest, _plain_bcrypt(digest)) is False
