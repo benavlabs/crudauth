@@ -246,7 +246,8 @@ class EmailFlowService:
 
         Raises:
             BadRequestException: If the token is invalid or expired, its user is
-                gone, or the account has left the state the token was minted for.
+                gone or inactive, or the account has left the state the token was
+                minted for.
         """
         payload = verify_signed_token_full(
             token, self.secret_key, purpose, algorithm=self.algorithm
@@ -254,8 +255,12 @@ class EmailFlowService:
         if payload is None:
             raise BadRequestException("Invalid or expired token")
         user = await self.repo.get_by_id(db, payload["sub"])
-        if user is None or not hmac.compare_digest(
-            str(payload.get(STATE_CLAIM, "")), self._state_fingerprint(purpose, user)
+        if (
+            user is None
+            or not self.repo.is_active(user)
+            or not hmac.compare_digest(
+                str(payload.get(STATE_CLAIM, "")), self._state_fingerprint(purpose, user)
+            )
         ):
             raise BadRequestException("Invalid or expired token")
         return user, payload
@@ -325,7 +330,8 @@ class EmailFlowService:
     ) -> None:
         """Send a verification token for the contract's recovery factor.
 
-        Idempotent; never reveals account existence. The user is looked up by the
+        Idempotent; never reveals account existence. An inactive account is sent
+        nothing, exactly as if it didn't exist. The user is looked up by the
         recovery factor (email for email recovery, phone for phone recovery) and
         the token is delivered to that factor's value over the configured channel.
 
@@ -344,7 +350,7 @@ class EmailFlowService:
         if not await self._email_within_limit(VERIFY_ACTION, value):
             return
         user = await self.repo.get_by_field(db, factor, value)
-        if user is None or self.repo.recovery_verified(user):
+        if user is None or not self.repo.is_active(user) or self.repo.recovery_verified(user):
             return
         token = self._mint_token(
             VERIFY, user, self.verify_ttl_hours, **self._redirect_claim(redirect_to)
@@ -390,7 +396,8 @@ class EmailFlowService:
         self, db: AsyncSession, value: str, *, redirect_to: str | None = None
     ) -> None:
         """Send a reset token over the configured channel. Idempotent; never reveals
-        account existence. Looked up by, and delivered to, the recovery factor.
+        account existence. Looked up by, and delivered to, the recovery factor. An
+        inactive account is sent nothing, exactly as if it didn't exist.
 
         Args:
             db: Active async session.
@@ -404,7 +411,7 @@ class EmailFlowService:
         if not await self._email_within_limit(RESET_ACTION, value):
             return
         user = await self.repo.get_by_field(db, factor, value)
-        if user is None:
+        if user is None or not self.repo.is_active(user):
             return
         token = self._mint_token(
             RESET, user, self.reset_ttl_hours, **self._redirect_claim(redirect_to)

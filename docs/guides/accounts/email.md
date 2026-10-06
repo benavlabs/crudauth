@@ -127,7 +127,9 @@ Verify and change-email follow the same shape, with different bodies (below).
 Each confirm response carries `redirect_to` when the request that sent the link asked for one.
 
 The `-request` endpoints return `200` whether or not the address exists, so they don't leak
-which accounts are registered. `/email/change-request` still rejects a wrong password (`400`)
+which accounts are registered. A disabled account (`is_active` false) is treated as one that
+doesn't exist: it's sent nothing, and a link it was sent before it was disabled stops working,
+so a disabled account can't have its password reset, its address verified or its email changed. `/email/change-request` still rejects a wrong password (`400`)
 or a `new_email` longer than your `email` column (`422`), since neither depends on other
 accounts. Tokens are single-use and time-limited
 (`verify_ttl_hours`, `reset_ttl_hours`, `change_ttl_hours` on `EmailConfig`).

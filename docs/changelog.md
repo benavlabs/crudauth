@@ -5,6 +5,26 @@ breaking changes; those are called out explicitly.
 
 ___
 
+## 0.7.5 - 2026-10-06
+
+The email flows now treat a disabled account the way 0.7.4 made OAuth treat it: as one that isn't
+there. No breaking changes.
+
+#### Fixed
+- **An inactive account is sent nothing, and its links stop working.** `/password/reset-request`
+  and `/email/verify-request` skip an account whose `is_active` is false, answering exactly as for
+  an unknown address, so nothing about it is revealed. A reset, verification or email-change link
+  sent before the account was disabled is refused at confirm with the usual
+  `Invalid or expired token`. Before, a disabled account could be emailed a working reset link, and
+  redeeming it set a new password, bumped `token_version` and ran `after_password_reset`, though the
+  account still couldn't sign in. A soft-deleting app that exposes `is_active` as a property gets
+  this for its deleted users too.
+
+#### Documentation
+- The email guide and the agent skill's `email.md` say a disabled account is treated as absent.
+
+___
+
 ## 0.7.4 - 2026-10-05
 
 An OAuth sign-in on a disabled account was refused, but only after the account had been linked to
