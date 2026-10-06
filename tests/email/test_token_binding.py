@@ -233,3 +233,86 @@ def test_change_email_routes_need_a_channel_that_emails_the_recipient(
 
     assert "/password/reset-request" in paths
     assert "/email/change-request" not in paths
+
+
+async def _disable(sessionmaker, repo: UserRepository, email: str = "a@x.com") -> None:
+    async with sessionmaker() as db:
+        await repo.update(db, await repo.get_by_email(db, email), {"is_active": False})
+
+
+@pytest.mark.parametrize(
+    ("route", "kind"),
+    [("/password/reset-request", "reset_password"), ("/email/verify-request", "verify_email")],
+    ids=["reset", "verification"],
+)
+async def test_an_inactive_account_is_sent_nothing_and_answered_like_an_unknown_one(
+    app_parts, sessionmaker, UserModel, route, kind
+) -> None:
+    app, sender = app_parts
+    repo = UserRepository(UserModel)
+    async with _client(app) as client:
+        await _register(client)
+        await _disable(sessionmaker, repo)
+        sender.sent.clear()
+        inactive = await client.post(route, json={"email": "a@x.com"})
+        unknown = await client.post(route, json={"email": "nobody@x.com"})
+
+    assert [msg["kind"] for msg in sender.sent] == []
+    assert (inactive.status_code, inactive.json()) == (unknown.status_code, unknown.json())
+
+
+async def test_a_reset_link_stops_working_once_the_account_is_disabled(
+    app_parts, sessionmaker, UserModel
+) -> None:
+    app, sender = app_parts
+    repo = UserRepository(UserModel)
+    async with _client(app) as client:
+        await _register(client)
+        await client.post("/password/reset-request", json={"email": "a@x.com"})
+        reset_token = sender.token_for("reset_password")
+        await _disable(sessionmaker, repo)
+        confirm = await client.post(
+            "/password/reset-confirm",
+            json={"token": reset_token, "new_password": "after-disable-1"},
+        )
+
+    async with sessionmaker() as db:
+        user = await repo.get_by_email(db, "a@x.com")
+    assert (confirm.status_code, confirm.json()) == (400, {"detail": "Invalid or expired token"})
+    assert repo.token_version(user) == 0
+
+
+async def test_a_verification_link_stops_working_once_the_account_is_disabled(
+    app_parts, sessionmaker, UserModel
+) -> None:
+    app, sender = app_parts
+    repo = UserRepository(UserModel)
+    async with _client(app) as client:
+        await _register(client)
+        verify_token = sender.token_for("verify_email")
+        await _disable(sessionmaker, repo)
+        confirm = await client.post("/email/verify-confirm", json={"token": verify_token})
+
+    async with sessionmaker() as db:
+        user = await repo.get_by_email(db, "a@x.com")
+    assert confirm.status_code == 400
+    assert repo.email_verified(user) is False
+
+
+async def test_an_email_change_link_stops_working_once_the_account_is_disabled(
+    app_parts, sessionmaker, UserModel
+) -> None:
+    app, sender = app_parts
+    repo = UserRepository(UserModel)
+    async with _client(app) as client:
+        await _register(client)
+        await _request_change(client, await _signed_in(client))
+        change_token = sender.token_for("change_email")
+        await _disable(sessionmaker, repo)
+        confirm = await client.post("/email/change-confirm", json={"token": change_token})
+
+    async with sessionmaker() as db:
+        unchanged = await repo.get_by_email(db, "a@x.com")
+    assert confirm.status_code == 400
+    assert unchanged is not None
+    assert [msg["kind"] for msg in sender.sent].count("email_changed") == 0

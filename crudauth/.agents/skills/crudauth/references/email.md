@@ -104,7 +104,8 @@ includes `redirect_to` only when the token carried one — the same key the OAut
 ## Security rules
 
 - **Request endpoints are non-enumerable.** They return a uniform response whether or not the account
-  exists (and skip already-verified). Don't change them to reveal existence.
+  exists (and skip already-verified). Don't change them to reveal existence. An inactive account is
+  treated as absent: sent nothing, and its outstanding links are refused at confirm.
 - **`current_user(verified=True)` gates on the recovery factor**, not `email_verified`.
 - A successful **password reset bumps `token_version`**, revoking the user's outstanding bearer tokens
   and other sessions.
