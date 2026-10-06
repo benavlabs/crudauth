@@ -72,7 +72,20 @@ fails with `email_unverified`:
   `name`, a default tier), use `new_user_fields` / `new_user_defaults`, which run on this path too; see
   [Registration](../accounts/registration.md#setting-columns-the-server-controls).
 
-A disabled user (`is_active` false) gets no session: the callback fails with `account_inactive`.
+A disabled user (`is_active` false) gets no session: the callback fails with `account_inactive`,
+and nothing is written to the account first, so it is neither linked to the provider nor claimed.
+CRUDAuth reads `is_active` as an attribute, so an app that soft-deletes users can keep its own flag
+as the source of truth and expose it as a property:
+
+```python
+class User(Base, AuthUserMixin):
+    is_deleted: Mapped[bool] = mapped_column(default=False)
+
+    @property
+    def is_active(self) -> bool:
+        return not self.is_deleted
+```
+
 OAuth logins skip [two-factor authentication](mfa.md#oauth) unless `MfaConfig(oauth=True)`.
 
 This linking logic lives in `auth.oauth` (an `OAuthAccountService`, or `None` when OAuth isn't
@@ -94,7 +107,7 @@ A failed callback redirects to `oauth_default_redirect` (by default `redirect_ba
 | `email_unverified` | The provider reports the email as unverified. |
 | `email_too_long` | The email is longer than your `email` column. |
 | `provider_already_linked` | The matching user is linked to a different account of this provider. |
-| `account_inactive` | The user is disabled. |
+| `account_inactive` | The user is disabled. Nothing was written to the account. |
 
 No session is created on any of these. In JSON mode an `invalid_state` answers `400` with
 `{"detail": "Invalid or expired OAuth state"}` rather than the code. A state is used up by its first

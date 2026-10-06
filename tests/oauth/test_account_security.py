@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 
 from crudauth import AuthHooks, CookieConfig, CRUDAuth, OAuthCredentials, SessionTransport
+from crudauth.exceptions import OAuthAccountException
 from crudauth.ratelimit import RateLimit
 from crudauth.oauth import AbstractOAuthProvider, OAuthProviderFactory, OAuthUserInfo
 from crudauth.repository import UserRepository
@@ -234,6 +235,73 @@ async def test_an_inactive_account_gets_no_session(
     assert _error(callback) == "account_inactive"
     assert "session_id=" not in " ".join(callback.headers.get_list("set-cookie"))
     assert (logins, sessions) == ([], [])
+
+
+@pytest.mark.parametrize("verified", [True, False], ids=["verified", "unverified"])
+async def test_a_sign_in_on_an_inactive_account_writes_nothing_to_it(
+    get_session, UserModel, sessionmaker, provider, verified
+) -> None:
+    """Refused before linking: no provider id, and an unverified account isn't claimed."""
+    auth, app = _app(get_session, UserModel)
+    repo = UserRepository(UserModel)
+    await auth.initialize()
+    async with sessionmaker() as db:
+        await repo.create(
+            db,
+            {
+                "email": "gone@x.com",
+                "username": "gone",
+                "hashed_password": get_password_hash("gone-pw"),
+                "email_verified": verified,
+                "is_active": False,
+            },
+        )
+    provider.profile = {"id": "idp-gone", "email": "gone@x.com"}
+    async with _client(app) as browser:
+        callback = await _sign_in(browser)
+    await auth.shutdown()
+
+    assert _error(callback) == "account_inactive"
+    async with sessionmaker() as db:
+        user = await repo.get_by_email(db, "gone@x.com")
+    assert repo.get(user, "stub_id") is None
+    assert repo.get(user, "oauth_provider") is None
+    assert repo.email_verified(user) is verified
+    assert not is_unusable_password(repo.get(user, "hashed_password"))
+    assert repo.token_version(user) == 0
+
+
+async def test_the_service_refuses_an_inactive_account_found_by_provider_id(
+    get_session, UserModel, sessionmaker, provider
+) -> None:
+    """An app driving ``get_or_create_user`` itself gets the refusal, not the user."""
+    auth, _ = _app(get_session, UserModel)
+    repo = UserRepository(UserModel)
+    await auth.initialize()
+    async with sessionmaker() as db:
+        await repo.create(
+            db,
+            {
+                "email": "linked@x.com",
+                "username": "linked",
+                "hashed_password": get_password_hash("linked-pw"),
+                "email_verified": True,
+                "is_active": False,
+                "stub_id": "idp-linked",
+            },
+        )
+        info = OAuthUserInfo(
+            provider="stub",
+            provider_user_id="idp-linked",
+            email="linked@x.com",
+            email_verified=True,
+        )
+        assert auth.oauth is not None
+        with pytest.raises(OAuthAccountException) as refused:
+            await auth.oauth.get_or_create_user(info, db)
+    await auth.shutdown()
+
+    assert refused.value.code == "account_inactive"
 
 
 @pytest.mark.parametrize(
