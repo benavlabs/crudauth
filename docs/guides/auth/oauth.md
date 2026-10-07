@@ -94,6 +94,49 @@ configured), so a hand-written callback can reuse it:
 [`OAuthAccountException`](../../api/exceptions.md) with the error code in `code`. See
 [Use the building blocks](../../cookbook/use-the-building-blocks.md).
 
+## Provider data on every sign-in
+
+CRUDAuth stores the provider id and the email. Anything else from the provider, especially data
+that changes over time, is yours to keep, and `on_oauth_login` hands it to you on every sign-in
+with the request's `db`. A GitHub login, for instance, changes when the user renames, and the
+username CRUDAuth derives at creation is sanitized and never updated, so it can't stand in for it:
+
+```python
+from sqlalchemy import update
+
+async def keep_github_login(user, info, *, db, created, context):
+    if info.provider == "github" and info.username:
+        await db.execute(
+            update(User).where(User.id == user["id"]).values(github_login=info.username)
+        )
+        await db.commit()
+
+auth = CRUDAuth(..., hooks=AuthHooks(on_oauth_login=keep_github_login))
+```
+
+It runs on every OAuth sign-in that reaches an active account: one that created it (`created` is
+`True`), linked it by email, or found it by provider id. It doesn't run for a disabled account or a
+sign-in that failed before that (a bad state, a failed token exchange). It runs before any
+[MFA challenge](mfa.md#oauth), once per sign-in, and before the session exists.
+
+Like every hook it's best-effort: it can't refuse the sign-in. An exception is logged, whatever the
+hook left uncommitted is rolled back, and the sign-in goes on. The hook commits its own writes. To
+refuse a sign-in based on the provider profile, use a hand-written callback.
+
+A hand-written callback that calls `auth.oauth.get_or_create_user` runs the hook itself, after its
+own checks, and is expected to refresh the user before reading it again:
+
+```python
+user, created = await auth.oauth.get_or_create_user(info, db)
+if not auth.repo.is_active(user):
+    ...  # refuse
+await auth.hooks.run_oauth_login(
+    auth.repo.to_dict(user), info, db=db, created=created,
+    context=HookContext(transport="oauth", request=request),
+)
+await auth.repo.refresh_if_expired(db, user)
+```
+
 ## Errors
 
 A failed callback redirects to `oauth_default_redirect` (by default `redirect_base_url`) with

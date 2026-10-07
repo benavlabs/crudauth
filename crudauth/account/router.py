@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, create_model
 
 from ..protocols import AuthSurface
-from ..exceptions import BadRequestException, UnauthorizedException
+from ..constants import FRESH_SIGN_IN_REQUIRED
+from ..exceptions import BadRequestException, ForbiddenException, UnauthorizedException
 from ..hooks import HookContext
 from ..principal import Principal
 from ..ratelimit import KeyBy
@@ -75,20 +76,17 @@ def build_account_router(auth: AuthSurface, session_manager: "SessionManager | N
         """Set a password for an account that doesn't have one (OAuth-only).
 
         Note:
-            The active session/credential IS the re-authentication - there's
-            no current password to check because the account never had one.
-            This is **set**, not **change**: it refuses (400) if the account
-            already has a usable password (use the password-reset flow to
-            change an existing one). It does not evict other sessions/tokens
-            (establishing a first credential isn't a compromise response).
-
-        Note:
-            Allowed over any transport. On the session path the POST already
-            carries CSRF; on the bearer path there's no CSRF surface (the
-            token is sent explicitly, not auto-attached), and a valid bearer
-            token is itself proof of the active credential - the same re-auth
-            argument. Narrow with ``transport="session"`` if your policy
-            requires first-password establishment to be browser-only.
+            There's no current password to re-enter, so the proof is a fresh
+            sign-in: the session making the request must have signed in within
+            ``fresh_sign_in_seconds`` (or hold sudo), else a 403 sends the person
+            to sign in again. A password is a lasting credential, and with it email
+            change and every other password-gated action, so an old or stolen
+            session cookie must not be enough. A bearer token carries no sign-in
+            time and is refused. This is **set**, not **change**: it refuses (400)
+            if the account already has a usable password (use the password-reset
+            flow to change an existing one). It does not evict other
+            sessions/tokens (establishing a first credential isn't a compromise
+            response).
         """
         user = principal.user
         new_password = cast(_SetPasswordIn, body).new_password
@@ -96,6 +94,8 @@ def build_account_router(auth: AuthSurface, session_manager: "SessionManager | N
             raise BadRequestException(
                 "Account already has a password; use the password reset flow to change it."
             )
+        if not await auth.signed_in_recently(principal):
+            raise ForbiddenException(FRESH_SIGN_IN_REQUIRED)
         await auth.validate_password(new_password, user=user, source="set", field="new_password")
         await repo.update(
             db, user, {"hashed_password": await get_password_hash_async(new_password)}

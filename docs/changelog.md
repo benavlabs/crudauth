@@ -9,8 +9,10 @@ ___
 
 Your own database as the shared store, for several workers on PostgreSQL, MySQL or SQLite without
 Redis, and the last pieces CRUDAdmin needs to run beside another CRUDAuth app: a logout it can call
-from its own route, the ended session named in the logout hook, and lockout counters kept apart. No
-breaking changes.
+from its own route, the ended session named in the logout hook, and lockout counters kept apart.
+Also the provider profile on every OAuth sign-in, and a security fix: an account without a password
+now needs a fresh sign-in before it adds a password or an authenticator. That fix is the one
+breaking change: an older session gets a `403` from `/set-password` and passwordless MFA setup.
 
 #### Added
 - **`DatabaseStore`** and **`CRUDAuth(database_store=...)`**. One switch moves every server-side
@@ -58,19 +60,63 @@ breaking changes.
   their lockout counters, so failures in one locked the same username or IP out of the other.
   `redis_rate_limiter(prefix=...)` and `DatabaseStore.rate_limiter(prefix=...)` take one too, for a
   `rate_limiter=` you build yourself.
+- **`AuthHooks(on_oauth_login=...)`**, called as `(user, info, *, db, created, context)` on every OAuth
+  sign-in that reaches an active account: one that created it, linked it by email, or found it by
+  provider id. `info` is the provider's normalized `OAuthUserInfo`, so an app can keep provider data
+  that changes over time in step, such as a GitHub login, which changes on rename and which the
+  username CRUDAuth derives once can't stand in for. It runs after the disabled-account check, before
+  any MFA challenge (once per sign-in, not again when the challenge is answered) and before the
+  session, in redirect and JSON mode. Best-effort like every hook: it can't refuse the sign-in. A
+  hand-written callback calls `auth.hooks.run_oauth_login(...)` after `get_or_create_user`.
+- **`auth.signed_in_recently(principal)`**, whether the session signed in within
+  `CRUDAuth(fresh_sign_in_seconds=600)` or holds sudo, for an app's own routes that add a lasting
+  credential.
+- **`auth.mfa_router`**, the `/mfa` routes on their own, beside `oauth_router`, `session_router` and
+  `bearer_router`, for an app that doesn't mount `auth.router`. It raises without MFA configured.
+- **`UserRepository.refresh_if_expired(db, user)`**, which reloads a user a rollback expired.
+
+#### Security
+- **An account without a password needs a fresh sign-in to add a password or an authenticator.**
+  `/mfa/totp/setup` asked an account with a password for it, but an OAuth-only account for nothing,
+  so any session cookie could enroll an authenticator. With sudo accepting a code, a stolen session
+  became lasting sudo. `/set-password` had the same gap and a worse outcome: a stolen session could
+  set a password, then change the email with it, and own the account. Both now require, of an
+  account without a usable password, that the session making the request signed in within
+  `fresh_sign_in_seconds` (default 600) or holds an active sudo elevation; otherwise `403` ("Sign in
+  again to continue"). `0` closes both routes to such accounts. A bearer token carries no sign-in
+  time (access tokens are re-minted on refresh), so it's refused. Accounts with a password are
+  unchanged at MFA setup; `/totp/disable` and `/recovery-codes/regenerate` already require a current
+  code, which a stolen session doesn't have.
 
 #### Fixed
+- **A hook that rolls back no longer breaks the request it ran in.** The hooks guide told a hook
+  that writes through `db` to roll back on its own failure. A rollback expires every row the session
+  holds, and crudauth went on reading the user: the OAuth callback (after `on_after_register`),
+  `/register`, and an MFA login finished with a recovery code (after `on_after_recovery_code_used`)
+  raised `MissingGreenlet`, a 500 for something that had succeeded. crudauth now reloads the user
+  when a hook expired it, and rolls back what a hook that raised left uncommitted: a hook whose
+  flush failed left the session raising `PendingRollbackError`, which failed an OAuth sign-in into
+  required MFA when the challenge then stored its pending secret.
 - **A session store passed to `SessionTransport(storage=...)` beside email or OAuth.** 0.8.0 built
   the one-time-token and OAuth-state stores from the transport's backend, which for a supplied store
   is `"custom"`, and failed at startup with `Unknown session backend: 'custom'`. Those stores now
   follow Redis or the database store when one is configured, and otherwise the transport's own
   backend, falling back to memory for a supplied store.
 
+#### Breaking changes
+- **`/set-password` and passwordless `/mfa/totp/setup` need a fresh sign-in** (see Security). A
+  frontend that offers either long after sign-in should send the user through the provider again on
+  the `403`, or raise `fresh_sign_in_seconds`. An app that called `/set-password` with a bearer token
+  for an OAuth-only account has to use a session, or its own route.
+
 #### Documentation
 - The storage guide's new "Database" section: setup, the tables and migrations, expiry and cleanup,
   and what's atomic on which database. The sessions guide and the agent skill point to it.
 - The sessions guide covers a logout of your own and lockout counters for two apps side by side; the
   hooks guide, `session_handle` on logout.
+- The OAuth guide's "Provider data on every sign-in", with a GitHub-login example and the
+  hand-written callback; `on_oauth_login` and the rollback behavior in the hooks guide; the fresh
+  sign-in in the MFA and passwords guides and the endpoint table; mounting `auth.mfa_router`.
 
 #### Tests
 - The storage conformance suite and a new contract suite run against memory, Redis (fakeredis) and
@@ -98,6 +144,19 @@ breaking changes.
 - The route checks in two tests read the mounted paths from the OpenAPI schema. On FastAPI 0.142
   and Starlette 1.7 `router.routes` holds nested routers, which failed one test and let the other
   pass without checking anything.
+- `on_oauth_login` through GitHub's own profile normalization: the login and `created` on a first
+  and a later sign-in, an email link, JSON mode, a write that persists and follows a rename, and no
+  run for a disabled account (existing or newly created), a forged state or a failed token
+  exchange; a hook that raises leaves the sign-in standing and its write undone; with
+  `MfaConfig(oauth=True)` it runs once, before the challenge.
+- A passwordless account with a session older than the window gets `403` at MFA setup and
+  `/set-password`; a fresh sign-in, a wider window and an active sudo elevation are let through;
+  `0` refuses; a bearer token is refused; an account with a password still proves it with the
+  password.
+- A hook that rolls back on `/register`, the OAuth callback and a recovery-code login: each request
+  still succeeds (each raised `MissingGreenlet` before). A hook whose flush failed ahead of the MFA
+  challenge's own write: the OAuth sign-in still reaches the challenge (it raised
+  `PendingRollbackError` before).
 
 ___
 

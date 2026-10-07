@@ -16,6 +16,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from .hooks import AuthHooks
     from .identity import IdentityConfig
     from .password import PasswordPolicy, PasswordSource
+    from .principal import Principal
     from .provisioning import NewUserFields
     from .ratelimit import KeyBy, RateLimit, RateLimitResolver, RateLimiterBackend
     from .repository import UserRepository
@@ -63,6 +64,8 @@ class AuthSurface(Protocol):
         key: KeyBy | Callable[..., str] = ...,
         transport: str | list[str] | None = None,
     ) -> Callable[..., Any]: ...
+
+    async def signed_in_recently(self, principal: Principal) -> bool: ...
 
     async def validate_password(
         self,

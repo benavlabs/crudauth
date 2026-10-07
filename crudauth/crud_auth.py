@@ -12,6 +12,7 @@ async def me(user: Principal = Depends(auth.current_user())):
 
 import inspect
 import logging
+from datetime import datetime, timedelta, timezone
 from dataclasses import asdict
 from types import MappingProxyType
 from typing import (
@@ -30,7 +31,12 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from .account import build_account_router
-from .constants import DEFAULT_ALGORITHM, OAUTH_STATE_TTL_SECONDS, USED_TOKEN_TTL_SECONDS
+from .constants import (
+    DEFAULT_ALGORITHM,
+    DEFAULT_FRESH_SIGN_IN_SECONDS,
+    OAUTH_STATE_TTL_SECONDS,
+    USED_TOKEN_TTL_SECONDS,
+)
 from .core import AuthRuntime, CookieConfig, Transport
 from .email.channel import DeliveryChannel
 from .email.router import build_email_router
@@ -146,6 +152,7 @@ class CRUDAuth:
         warn_on_memory_backend: bool = True,
         password_policy: PasswordPolicy | None = None,
         legacy_verifiers: Sequence[LegacyVerifier] | None = None,
+        fresh_sign_in_seconds: int = DEFAULT_FRESH_SIGN_IN_SECONDS,
     ):
         """Configure the auth surface.
 
@@ -288,6 +295,14 @@ class CRUDAuth:
                 ``(plain_password, hashed_password) -> bool``, runs in a worker thread,
                 and runs for an unknown user too (against a dummy hash), so it can't
                 reveal which accounts exist.
+            fresh_sign_in_seconds: How recently an account with no usable password (an
+                OAuth-only one) must have signed in, on the session making the request,
+                to set its first password (``/set-password``) or start MFA enrollment
+                (``/mfa/totp/setup``). It has no password to re-enter, so without this
+                any stolen session cookie could attach a lasting credential. An active
+                sudo elevation counts as fresh too. Default 600 (10 minutes); ``0``
+                closes both routes to such accounts. See
+                [signed_in_recently][crudauth.crud_auth.CRUDAuth.signed_in_recently].
 
         Raises:
             ValueError: If ``SECRET_KEY`` is empty; if ``oauth`` or ``sudo`` is
@@ -296,7 +311,8 @@ class CRUDAuth:
                 ``{provider}_id`` column on the user model; if ``email`` or
                 ``channels`` is set with ``identity.recovery=None``; if
                 ``rate_limits`` names an unknown action; or if ``lockout`` is set
-                alongside a ``SessionTransport``'s ``login_*`` arguments.
+                alongside a ``SessionTransport``'s ``login_*`` arguments; or if
+                ``fresh_sign_in_seconds`` is negative.
         """
         if not SECRET_KEY:
             raise ValueError("SECRET_KEY is required")
@@ -324,6 +340,9 @@ class CRUDAuth:
         )
         self._validate_identity(oauth=oauth, email=email, channels=channels)
         self.hooks = hooks or AuthHooks()
+        if fresh_sign_in_seconds < 0:
+            raise ValueError("fresh_sign_in_seconds must be 0 (closed) or a number of seconds")
+        self.fresh_sign_in_seconds = fresh_sign_in_seconds
         self.new_user_fields = new_user_fields
         self.new_user_defaults = self.repo.filter_provisioning_data(new_user_defaults or {})
         self._register_schema = register_schema
@@ -817,12 +836,54 @@ class CRUDAuth:
         """
         return self._oauth_service
 
+    async def signed_in_recently(self, principal: Principal) -> bool:
+        """Whether ``principal`` signed in within ``fresh_sign_in_seconds``, or holds sudo.
+
+        The proof an account with no password can give before it adds a lasting
+        credential: ``/set-password`` and ``/mfa/totp/setup`` require it of such an
+        account. Only a session knows when it signed in, so a principal from another
+        transport (a bearer token is re-minted on refresh without one) is never fresh.
+        Always ``False`` when ``fresh_sign_in_seconds`` is ``0``.
+
+        Example:
+            ```python
+            @app.post("/link-github")
+            async def link(principal: Principal = Depends(auth.current_user())):
+                if not await auth.signed_in_recently(principal):
+                    raise HTTPException(403, "Sign in again to continue.")
+            ```
+        """
+        session_id = principal.metadata.get("session_id")
+        manager = self._session_manager
+        if not self.fresh_sign_in_seconds or manager is None:
+            return False
+        if principal.transport != SessionTransport.name or not session_id:
+            return False
+        if self.sudo is not None and await self.sudo.is_elevated(principal):
+            return True
+        session = await manager.get_session(str(session_id))
+        if session is None:
+            return False
+        window = timedelta(seconds=self.fresh_sign_in_seconds)
+        return session.created_at >= datetime.now(timezone.utc) - window
+
     @property
     def oauth_router(self) -> APIRouter:
         """The configured OAuth routes, for apps keeping their own auth routes."""
         if self._oauth_router is None:
             raise RuntimeError("OAuth is not configured")
         return self._oauth_router
+
+    @property
+    def mfa_router(self) -> APIRouter:
+        """Only the ``/mfa`` routes, for apps that mount crudauth's routers one at a time.
+
+        Raises:
+            RuntimeError: If MFA isn't configured.
+        """
+        if self.runtime.mfa is None:
+            raise RuntimeError("MFA is not configured")
+        return build_mfa_router(auth=self, service=self.runtime.mfa)
 
     @property
     def mfa(self) -> MfaService | None:

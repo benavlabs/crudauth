@@ -288,7 +288,7 @@ Load on demand:
 - `references/transports.md` — session vs bearer, `/token` `/refresh`, scopes, CSRF, multiple transports.
 - `references/email.md` — `EmailConfig`, `EmailSender` + `EmailContext`, `DeliveryChannel` / `DeliveryIntent`,
   the message kinds, verify/reset/change endpoints, non-enumeration.
-- `references/oauth.md` — providers, `OAuthCredentials`, account linking, `/set-password`, custom providers.
+- `references/oauth.md` — providers, `OAuthCredentials`, account linking, `on_oauth_login`, `/set-password`, custom providers.
 - `references/production.md` — Redis storage, lifespan, rate limiting & lockout, sudo mode, proxies, secrets.
 - `references/mfa.md` — TOTP two-factor: `MfaConfig`, `make_auth_identity(mfa=True)`, login challenges,
   `/mfa/*` routes, recovery codes, sudo with a code.

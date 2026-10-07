@@ -12,7 +12,7 @@ import logging
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-from sqlalchemy import String, TypeDecorator, UniqueConstraint, or_, select, update
+from sqlalchemy import String, TypeDecorator, UniqueConstraint, inspect, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import TypeEngine
 
@@ -407,6 +407,16 @@ class UserRepository:
         await db.commit()
         await db.refresh(user)
         return user
+
+    async def refresh_if_expired(self, db: AsyncSession, user: Any) -> None:
+        """Reload ``user`` if a rollback (a hook's, say) expired its attributes.
+
+        Reading an expired attribute makes SQLAlchemy load it lazily, which an async
+        session can't do outside its greenlet (``MissingGreenlet``). crudauth calls
+        this after a hook handed ``db``, before it reads the user again.
+        """
+        if inspect(user).expired_attributes:
+            await db.refresh(user)
 
     # --- principal flags -----------------------------------------------------
     def is_superuser(self, user: Any) -> bool:

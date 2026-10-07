@@ -39,6 +39,10 @@ DEFAULT_SESSION_TIMEOUT_MINUTES = 30
 DEFAULT_REMEMBER_ME_DAYS = 30
 DEFAULT_CLEANUP_INTERVAL_MINUTES = 15
 CSRF_TOKEN_BYTES = 32
+# How recently an account with no password must have signed in to add a lasting
+# credential (a first password, an authenticator) through crudauth's routes.
+DEFAULT_FRESH_SIGN_IN_SECONDS = 600
+FRESH_SIGN_IN_REQUIRED = "Sign in again to continue: this needs a recent sign-in."
 
 # --- oauth / email flows -------------------------------------------------
 OAUTH_STATE_TTL_SECONDS = 30 * SECONDS_PER_MINUTE

@@ -28,6 +28,7 @@ be lost, enqueue it from the hook rather than doing it inline.
 | Hook | Fires after | Receives |
 |---|---|---|
 | `on_after_register` | an account is created | `user, db, context` |
+| `on_oauth_login` | an OAuth sign-in resolves an active account | `user, info, db, created, context` |
 | `on_login_failed` | a refused password login | `identifier, user, reason, context` |
 | `on_lockout` | a password login refused by the lockout | `identifier, retry_after, context` |
 | `on_after_login` | a successful login | `user, request, context` |
@@ -42,6 +43,19 @@ be lost, enqueue it from the hook rather than doing it inline.
 | `on_after_recovery_code_used` | an MFA recovery code is spent | `user, db, context` |
 
 All hooks also receive a `context` keyword.
+
+A hook handed `db` commits its own writes; crudauth has already committed its own by then. If the
+hook raises, crudauth logs it and rolls back whatever the hook left uncommitted, so the session is
+usable again for the rest of the request. A hook may also roll back itself. crudauth reloads the
+user afterwards if that expired it.
+
+`on_oauth_login` runs on every OAuth sign-in that reaches an active account, whether it created the
+account, linked it by email, or found it by provider id. `info` is the provider's normalized
+profile (`OAuthUserInfo`: `info.username` is the GitHub login, `info.raw_data` the provider's
+payload), so the app can keep provider data that changes over time in step, in the same request.
+`created` says whether this sign-in made the account. It runs after the disabled-account check,
+before any MFA challenge and before the session exists, so `context.session_handle` is `None`. See
+[OAuth](../auth/oauth.md#provider-data-on-every-sign-in).
 
 `on_login_failed` gets the identifier as typed (untrusted input: escape it before it reaches a
 page), `user` (the account it named, or `None` when it named none) and `reason`
