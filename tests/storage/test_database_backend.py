@@ -16,6 +16,7 @@ import fakeredis.aioredis  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
 from crudauth.ratelimit import MemoryRateLimiterBackend, RedisBackend  # noqa: E402
@@ -426,6 +427,32 @@ class TestDatabaseEdges:
             remaining = len((await connection.execute(store.store.select())).all())
         assert remaining == 4 + 7 - 4
         assert await store.purge_expired() == 3
+
+    async def test_a_lost_claim_on_sqlite_raises_nothing_in_the_driver(
+        self, dialect: str, engine_for: Any
+    ) -> None:
+        """SQLAlchemy 2.0's aiosqlite adapter leaves the cursor of a failed statement open. On
+        Python 3.11, where ``rollback()`` no longer resets statements and a failed one isn't reset
+        either, that cursor kept the pooled connection holding SQLite's lock until it was garbage
+        collected, and every other writer timed out with "database is locked". Losing a claim is
+        the expected outcome, so on SQLite it must not go through a duplicate-key error at all."""
+        if not dialect.startswith("sqlite"):
+            pytest.skip("aiosqlite only")
+        engine, store = await engine_for(dialect, purge_every=0)
+        storage = store.storage(prefix="test:")
+        errors: list[str] = []
+
+        def record(context: Any) -> None:
+            errors.append(type(context.original_exception).__name__)
+
+        event.listen(engine.sync_engine, "handle_error", record)
+        won = await storage.set_if_absent("token", Record(first="a"), 60)
+        lost = await storage.set_if_absent("token", Record(first="b"), 60)
+        event.remove(engine.sync_engine, "handle_error", record)
+
+        assert (won, lost) == (True, False)
+        assert errors == []
+        assert (await storage.get("token", Record)) == Record(first="a")
 
     async def test_concurrent_writes_into_a_populated_table_all_succeed(
         self, dialect: str, engine_for: Any

@@ -5,6 +5,29 @@ breaking changes; those are called out explicitly.
 
 ___
 
+## 0.8.2 - 2026-10-07
+
+A fix for the database store on SQLite under Python 3.11. No other changes.
+
+#### Fixed
+- **A used email link no longer stalls a SQLite `DatabaseStore` on Python 3.11.** Opening a
+  verification, password reset or email change link a second time (a double click, or a mail
+  scanner fetching it first) loses the store's `set_if_absent` claim, which went through a
+  duplicate-key error. SQLAlchemy 2.0's aiosqlite adapter leaves a failed statement's cursor open,
+  and on Python 3.11, where `rollback()` no longer resets pending statements and a failed one isn't
+  reset either, that cursor kept its pooled connection holding SQLite's lock until it was garbage
+  collected. Every other write to the database, logins and their lockout counters included, waited
+  out SQLite's timeout and failed with "database is locked". On SQLite the claim is now
+  `INSERT OR IGNORE`, so losing it raises nothing. PostgreSQL, MySQL and MariaDB, and Python 3.10,
+  3.12 and 3.13, weren't affected.
+
+#### Tests
+- A lost claim on SQLite raises no error in the driver, on every Python version. The concurrent
+  `set_if_absent` tests that failed on 3.11 in CI pass there again; the full suite passes on 3.11
+  and 3.12.
+
+___
+
 ## 0.8.1 - 2026-10-07
 
 Your own database as the shared store, for several workers on PostgreSQL, MySQL or SQLite without
