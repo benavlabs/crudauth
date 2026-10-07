@@ -61,7 +61,7 @@ lockout has left. Both run on every password login (`/login`, `/token`, and
 | `transport` | Which transport authenticated (`"session"`, `"bearer"`, ...). |
 | `request` | The FastAPI `Request`, when available. |
 | `extra` | A dict for flow-specific extras. |
-| `session_handle` | On a session login, the session's public handle, the same `id` `GET /sessions` lists. An audit log can name the session and match it to a later revocation without storing a credential. |
+| `session_handle` | On a session login or logout, the session's public handle, the same `id` `GET /sessions` lists. An audit log can name the session that started and the one that ended, and match either to a revocation, without storing a credential. |
 
 ## Example: an audit log
 

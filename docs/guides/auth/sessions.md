@@ -59,6 +59,26 @@ async def my_login(body: LoginIn, request: Request, response: Response, db: DbDe
 A wrong password raises `UnauthorizedException`, a tripped lockout `RateLimitException` - the same
 responses `/login` gives. See [Use the building blocks](../../cookbook/use-the-building-blocks.md).
 
+### A logout of your own
+
+A logout route of your own (an HTML form that redirects, say) calls the transport's
+`complete_logout`, which does what `POST /logout` does: it ends the session the request's cookie
+names, clears every transport's cookies and runs `on_after_logout`. A live session still needs the
+`X-CSRF-Token` header; one that already expired is just cleared.
+
+```python
+transport = SessionTransport()
+auth = CRUDAuth(..., transports=[transport])
+
+@app.post("/admin/logout")
+async def admin_logout(request: Request, db: DbDep):
+    response = RedirectResponse("/admin/login", status_code=303)
+    await transport.complete_logout(request, response, db)
+    return response
+```
+
+It returns `True` if a session was ended and `False` if there was none.
+
 ## How a session works
 
 On a successful `POST /login`, CRUDAuth:
@@ -190,6 +210,11 @@ SessionTransport(
 )
 ```
 
+Their lockout counters need the same care. On a shared Redis or counter table, failures in one app
+would lock the same username or IP out of the other. Give the embedded app's rate limiter its own
+prefix with `CRUDAuth(..., rate_limit_prefix="admin:rl:")`, or, when you pass `rate_limiter=`
+yourself, `redis_rate_limiter(..., prefix="admin:rl:")` or `store.rate_limiter(prefix="admin:rl:")`.
+
 ## Your own session store
 
 To keep sessions somewhere other than memory or Redis (a database table, Memcached), implement
@@ -207,7 +232,9 @@ The stores carry their own prefix and expiration, so they can't be combined with
 ## Backends and lifespan
 
 The in-memory backend is per-process, which is fine for development but breaks under multiple
-workers. Use Redis in production, and open and close the connections in your app's lifespan:
+workers. Use Redis in production, or your own database through `CRUDAuth(database_store=...)` when
+you run several workers without Redis ([Storage](../infra/storage.md#database)): it carries the
+lockout counters across workers too. Open and close the connections in your app's lifespan:
 
 ```python
 from contextlib import asynccontextmanager

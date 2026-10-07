@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
 from ...exceptions import ForbiddenException
-from ...hooks import HookContext
 from ...utils import is_cross_site
 from ..login import password_login
 
@@ -62,28 +61,10 @@ def build_session_routes(transport: "SessionTransport") -> APIRouter:
 
         Clears every configured transport's cookies, including a bearer refresh
         cookie. A session that already expired has nothing left to protect, so
-        its cookies are cleared without a CSRF check.
+        its cookies are cleared without a CSRF check. The body of
+        [complete_logout][crudauth.transports.session.transport.SessionTransport.complete_logout].
         """
-        session_id = request.cookies.get(manager.session_cookie_name)
-        session = (
-            await manager.validate_session(session_id, update_activity=False)
-            if session_id
-            else None
-        )
-        user_dict = None
-        if session_id and session is not None:
-            await transport.enforce_csrf(request, session_id)
-            user = await runtime.repo.get_by_id(db, session.user_id)
-            if user is not None:
-                user_dict = runtime.repo.to_dict(user)
-            await manager.terminate_session(session_id, reason="logout")
-        runtime.clear_cookies(response)
-        if user_dict is not None:
-            await runtime.hooks.run_after_logout(
-                user_dict,
-                request=request,
-                context=HookContext(transport=transport.name, request=request),
-            )
+        await transport.complete_logout(request, response, db)
         return {"detail": "Logged out"}
 
     return router

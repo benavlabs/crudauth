@@ -26,9 +26,10 @@ Hook = Callable[..., Optional[Awaitable[None]]]
 class HookContext:
     """Ambient request/identity info passed to hooks as ``context=``.
 
-    ``session_handle`` is set on a session login: the same public, non-reversible
-    handle ``GET /sessions`` lists, so an audit log can name the session that was
-    created (and later match it to a revocation) without storing a credential.
+    ``session_handle`` is set on a session login and logout: the same public,
+    non-reversible handle ``GET /sessions`` lists, so an audit log can name the
+    session that was created or ended (and match it to a revocation) without
+    storing a credential.
     """
 
     ip_address: str | None = None

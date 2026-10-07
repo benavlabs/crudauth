@@ -33,3 +33,28 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -q -p no:warnings
+
+  sqlite-before-returning:
+    # Debian bullseye's SQLite is 3.34.1, older than RETURNING (3.35); many distro
+    # Pythons are older still. PostgreSQL and MySQL skip here, having no Docker.
+    runs-on: ubuntu-latest
+    container: python:3.10-slim-bullseye
+    # .python-version asks for 3.12, which uv would download along with a current SQLite;
+    # pin the container's own Python so the tests run on its old SQLite.
+    env:
+      UV_PYTHON: /usr/local/bin/python3.10
+      UV_PYTHON_DOWNLOADS: never
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install the project
+        run: uv sync --frozen --all-extras --dev
+
+      - name: Run tests
+        run: |
+          uv run python -c "import sqlite3, sys; print('SQLite', sqlite3.sqlite_version); sys.exit(sqlite3.sqlite_version_info >= (3, 35))"
+          uv run pytest -q -p no:warnings

@@ -39,6 +39,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from .mfa.service import MfaService
     from .ratelimit import LockoutPolicy, RateLimiterBackend
     from .repository import UserRepository
+    from .storage.backends.database import DatabaseStore
 
 __all__ = ["Transport", "AuthContext", "AuthRuntime", "CookieConfig"]
 
@@ -87,6 +88,8 @@ class AuthRuntime:
         transports: Every configured transport, in precedence order.
         mfa: The [MfaService][crudauth.mfa.service.MfaService], or ``None`` when MFA
             isn't configured.
+        database_store: The [DatabaseStore][crudauth.storage.backends.database.DatabaseStore]
+            every server-side store keeps its state in, or ``None``.
         legacy_verifiers: Checks for password hashes another system wrote, tried at
             login when crudauth's own check fails; a match is rehashed in crudauth's
             format.
@@ -111,6 +114,7 @@ class AuthRuntime:
     redis_client: Any = None
     transports: list[Transport] = field(default_factory=list)
     mfa: "MfaService | None" = None
+    database_store: "DatabaseStore | None" = None
     legacy_verifiers: tuple[LegacyVerifier, ...] = ()
 
     def clear_cookies(self, response: Response) -> None:

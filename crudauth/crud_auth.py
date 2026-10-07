@@ -67,9 +67,9 @@ from .ratelimit.dependency import limit_by_request, limit_by_user
 from .register import build_register_route
 from .repository import REGISTRATION_ALLOWED_FIELDS, UserRepository
 from .resolution import PrincipalResolver
-from .storage import MemorySessionStorage, get_session_storage
+from .storage import DatabaseStore, MemorySessionStorage, get_session_storage
 from .storage.backends.redis import redis_client_from_url
-from .storage.constants import BACKEND_MEMORY, BACKEND_REDIS
+from .storage.constants import BACKEND_CUSTOM, BACKEND_DATABASE, BACKEND_MEMORY, BACKEND_REDIS
 from .sudo import SudoConfig, SudoManager
 from .transports.bearer.transport import BearerTransport
 from .transports.session.management import build_session_management_router
@@ -136,6 +136,8 @@ class CRUDAuth:
         rate_limiter: "RateLimiterBackend | None" = None,
         redis_url: str | None = None,
         redis_client: Any = None,
+        database_store: DatabaseStore | None = None,
+        rate_limit_prefix: str | None = None,
         rate_limits: dict[str, RateLimit] | None = None,
         lockout: LockoutConfig | None = None,
         trusted_proxy_hops: int = 0,
@@ -234,6 +236,20 @@ class CRUDAuth:
                 ``redis_url``, with either ``decode_responses`` setting. The caller
                 owns it, so ``shutdown()`` doesn't close it. Mutually exclusive with
                 ``redis_url``.
+            database_store: A [DatabaseStore][crudauth.storage.backends.database.DatabaseStore]
+                to keep every server-side store in, the way ``redis_url`` does with
+                Redis: sessions and CSRF tokens, the one-time-token, OAuth-state and
+                MFA stores, and the default rate limiter (so login lockout is
+                counted across workers too). For several workers on a database
+                without Redis. A part configured directly keeps its own setting.
+                Mutually exclusive with ``redis_url`` and ``redis_client``.
+            rate_limit_prefix: The key prefix of the default rate limiter built from
+                ``redis_url``, ``redis_client`` or ``database_store``, in place of its
+                own (``"crudauth:rl:"`` on Redis, none in the database). Two apps
+                sharing one Redis or counter table (an admin panel beside the main
+                app) need different ones, or failures in one lock the same username
+                or IP out of the other. Can't be combined with ``rate_limiter=``,
+                which carries its own.
             rate_limits: Per-action overrides merged over
                 :data:`~crudauth.ratelimit.DEFAULT_RATE_LIMITS`. Keys must be
                 built-in actions; a custom action takes its limit in
@@ -284,8 +300,18 @@ class CRUDAuth:
         """
         if not SECRET_KEY:
             raise ValueError("SECRET_KEY is required")
+        if database_store is not None and (redis_url is not None or redis_client is not None):
+            raise ValueError(
+                "database_store can't be combined with redis_url or redis_client: "
+                "pick one place to keep server-side state"
+            )
         if redis_client is not None and redis_url is not None:
             raise ValueError("redis_url and redis_client are mutually exclusive")
+        if rate_limit_prefix is not None and rate_limiter is not None:
+            raise ValueError(
+                "rate_limit_prefix can't be combined with rate_limiter: "
+                "give the backend you pass its own prefix"
+            )
         self.session = session
         self.password_policy = password_policy or PasswordPolicy()
         self.identity = identity or IdentityConfig()
@@ -318,6 +344,8 @@ class CRUDAuth:
             rate_limiter=rate_limiter,
             lockout=lockout,
             trusted_proxy_hops=trusted_proxy_hops,
+            database_store=database_store,
+            rate_limit_prefix=rate_limit_prefix,
             legacy_verifiers=tuple(legacy_verifiers or ()),
         )
         self._principals = PrincipalResolver(self.runtime)
@@ -372,19 +400,29 @@ class CRUDAuth:
         rate_limiter: "RateLimiterBackend | None",
         lockout: LockoutConfig | None,
         trusted_proxy_hops: int,
+        database_store: DatabaseStore | None,
+        rate_limit_prefix: str | None,
         legacy_verifiers: tuple[LegacyVerifier, ...],
     ) -> AuthRuntime:
         """The state transports and services share, before any transport is bound.
 
-        The rate limiter defaults to Redis when a Redis client is configured, else
-        memory, and the login lockout is built on it here because both transports
-        read ``runtime.lockout`` when they bind.
+        The rate limiter defaults to Redis when a Redis client is configured, to the
+        database when a ``database_store`` is, else memory, and the login lockout is
+        built on it here because both transports read ``runtime.lockout`` when they bind.
+        A ``rate_limit_prefix`` replaces the Redis or database limiter's own key prefix.
         """
-        limiter = rate_limiter or (
-            redis_rate_limiter(client=redis_client)
-            if redis_client is not None
-            else MemoryRateLimiterBackend()
-        )
+        limiter: "RateLimiterBackend"
+        if rate_limiter is not None:
+            limiter = rate_limiter
+        elif redis_client is not None:
+            if rate_limit_prefix is None:
+                limiter = redis_rate_limiter(client=redis_client)
+            else:
+                limiter = redis_rate_limiter(client=redis_client, prefix=rate_limit_prefix)
+        elif database_store is not None:
+            limiter = database_store.rate_limiter(prefix=rate_limit_prefix or "")
+        else:
+            limiter = MemoryRateLimiterBackend()
         return AuthRuntime(
             secret_key=secret_key,
             repo=self.repo,
@@ -398,6 +436,7 @@ class CRUDAuth:
             trusted_proxy_hops=trusted_proxy_hops,
             redis_client=redis_client,
             transports=self.transports,
+            database_store=database_store,
             legacy_verifiers=legacy_verifiers,
         )
 
@@ -522,8 +561,15 @@ class CRUDAuth:
     def _backend_config(self) -> tuple[str, Any]:
         if self.runtime.redis_client is not None:
             return BACKEND_REDIS, self.runtime.redis_client
-        if self._session_transport is not None and self._session_transport.backend is not None:
-            return self._session_transport.backend, self._session_transport.redis_client
+        if self.runtime.database_store is not None:
+            return BACKEND_DATABASE, None
+        transport = self._session_transport
+        if (
+            transport is not None
+            and transport.backend is not None
+            and transport.backend != BACKEND_CUSTOM
+        ):
+            return transport.backend, transport.redis_client
         return BACKEND_MEMORY, None
 
     def _new_store(self, label: str, prefix: str, expiration: int) -> "AbstractSessionStorage[Any]":
@@ -533,7 +579,11 @@ class CRUDAuth:
         """
         backend, redis_client = self._backend_config()
         store = get_session_storage(
-            backend, prefix=prefix, expiration=expiration, client=redis_client
+            backend,
+            prefix=prefix,
+            expiration=expiration,
+            client=redis_client,
+            database=self.runtime.database_store,
         )
         self._stores.append((label, store))
         return store
