@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 
 import pytest_asyncio
+from fastapi import APIRouter, FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -57,3 +58,14 @@ async def get_session(sessionmaker):
 @pytest_asyncio.fixture
 def UserModel():
     return User
+
+
+def mounted_paths(router: APIRouter) -> set[str]:
+    """Every path ``router`` serves once mounted, read from the app's OpenAPI schema.
+
+    ``router.routes`` is flat on older FastAPI and holds nested routers on newer ones,
+    so a path check against it can pass with nothing mounted; the schema lists them all.
+    """
+    app = FastAPI()
+    app.include_router(router)
+    return set(app.openapi()["paths"])

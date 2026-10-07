@@ -31,6 +31,7 @@ from crudauth.mfa.recovery import hash_recovery_codes
 from crudauth.oauth import AbstractOAuthProvider, OAuthProviderFactory, OAuthUserInfo
 from crudauth.ratelimit import LockoutConfig
 from crudauth.storage.backends.memory import MemorySessionStorage
+from tests.conftest import mounted_paths
 
 from .conftest import (
     MFA_KEY,
@@ -502,7 +503,7 @@ def test_an_invalid_config_fails_at_construction(mfa_session, options: dict[str,
 
 def test_without_mfa_nothing_is_mounted(get_session, UserModel) -> None:
     auth = CRUDAuth(session=get_session, user_model=UserModel, SECRET_KEY=SECRET)
-    paths = {getattr(route, "path", "") for route in auth.router.routes}
+    paths = mounted_paths(auth.router)
 
     assert auth.mfa is None
     assert not any(path.startswith("/mfa") for path in paths)
