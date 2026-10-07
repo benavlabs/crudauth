@@ -365,7 +365,9 @@ class DatabaseSessionStorage(AbstractSessionStorage[T]):
         - ``modify`` is a compare-and-set on a version column: the update applies
           only to the version it read, and a lost race reads again and reapplies.
         - ``set_if_absent`` removes an expired row and inserts in one transaction;
-          a duplicate-key error means another writer won.
+          a duplicate-key error means another writer won. On SQLite the insert is
+          ``INSERT OR IGNORE`` and inserting nothing means the same, so a lost claim
+          raises nothing in the driver.
         - ``get_and_delete`` is one ``DELETE ... RETURNING`` where the database has it.
           Elsewhere (MySQL, SQLite before 3.35) it reads the value, then deletes the row
           only if it still holds that value, and hands the value out only if its delete
@@ -524,20 +526,23 @@ class DatabaseSessionStorage(AbstractSessionStorage[T]):
             "expires_at": _expires_at(self._ttl(expiration)),
         }
 
-        async def claim(session: AsyncSession) -> None:
+        insert = self.table.insert().prefix_with("OR IGNORE", dialect="sqlite").values(**row)
+
+        async def claim(session: AsyncSession) -> bool:
             await session.execute(
                 delete(self.table).where(
                     self.table.c.key == key, self.table.c.expires_at <= now_ms()
                 )
             )
-            await session.execute(self.table.insert().values(**row))
+            return bool(await _rowcount(session, insert))
 
         try:
-            await self.database.run(claim)
+            claimed = await self.database.run(claim)
         except IntegrityError:
             return False
-        await self.database.note_write()
-        return True
+        if claimed:
+            await self.database.note_write()
+        return claimed
 
     async def get_and_delete(self, session_id: str, model_class: type[T]) -> T | None:
         """Read and delete; only the caller whose delete removed the row gets the value."""
