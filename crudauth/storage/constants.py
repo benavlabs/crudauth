@@ -40,3 +40,6 @@ DATABASE_TRANSACTION_ATTEMPTS = 5
 
 # Compare-and-set attempts before a database-backed modify gives up.
 DATABASE_MODIFY_MAX_ATTEMPTS = 50
+
+# SQLAlchemy dialect names that speak MySQL's SQL; MariaDB reports its own.
+MYSQL_DIALECTS = ("mysql", "mariadb")

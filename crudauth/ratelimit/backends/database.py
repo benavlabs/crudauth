@@ -16,7 +16,6 @@ from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...storage.backends.database import (
-    MYSQL_DIALECTS,
     DatabaseStore,
     _rowcount,
     _scalars,
@@ -25,6 +24,7 @@ from ...storage.backends.database import (
     stored_key,
     upserts_returning,
 )
+from ...storage.constants import MYSQL_DIALECTS
 from ..base import RateLimiterBackend
 
 __all__ = ["DatabaseRateLimiterBackend"]
