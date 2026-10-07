@@ -8,8 +8,15 @@ import fakeredis.aioredis
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from crudauth import CookieConfig, CRUDAuth, SessionTransport
+from crudauth import CookieConfig, CRUDAuth, DatabaseStore, SessionTransport
+from crudauth.ratelimit import (
+    LockoutConfig,
+    MemoryRateLimiterBackend,
+    RedisBackend,
+    redis_rate_limiter,
+)
 from crudauth.repository import UserRepository
 from crudauth.storage import MemorySessionStorage
 from crudauth.transports.session.schemas import CSRFToken, SessionData
@@ -23,6 +30,7 @@ ADMIN: dict[str, Any] = {
     "storage_prefix": "admin:session:",
     "csrf_storage_prefix": "admin:csrf:",
 }
+LOCKOUT = LockoutConfig(max_attempts=2)
 
 
 def _app(get_session, UserModel, transport: SessionTransport) -> tuple[CRUDAuth, FastAPI]:
@@ -203,3 +211,85 @@ def test_a_contradictory_configuration_is_refused(options: dict[str, Any], messa
 
 def test_a_store_without_csrf_needs_no_csrf_store() -> None:
     SessionTransport(storage=MemorySessionStorage(), csrf=False)
+
+
+async def _lock_out(client: httpx.AsyncClient) -> None:
+    for _ in range(LOCKOUT.max_attempts):
+        await client.post("/login", data={"username": "both", "password": "wrong"})
+    assert (await _login(client)).status_code == 429
+
+
+def _limited_app(
+    get_session: Any, UserModel: Any, prefix: str | None, **storage: Any
+) -> tuple[CRUDAuth, FastAPI]:
+    auth = CRUDAuth(
+        session=get_session,
+        user_model=UserModel,
+        SECRET_KEY=SECRET,
+        transports=[SessionTransport(cookies=CookieConfig(secure=False))],
+        lockout=LOCKOUT,
+        rate_limit_prefix=prefix,
+        **storage,
+    )
+    app = FastAPI()
+    app.include_router(auth.router)
+    return auth, app
+
+
+@pytest.mark.parametrize("backend", ["redis", "database"])
+@pytest.mark.parametrize(
+    ("admin_prefix", "locked"), [(None, True), ("admin:rl:", False)], ids=["shared", "own"]
+)
+async def test_a_lockout_in_one_app_does_not_lock_the_other_out_with_its_own_prefix(
+    get_session: Any,
+    UserModel: Any,
+    sessionmaker: Any,
+    backend: str,
+    admin_prefix: str | None,
+    locked: bool,
+) -> None:
+    """Failures in the main app lock the username out there; the admin, sharing the store, is
+    locked out too unless its counters have their own prefix."""
+    redis = fakeredis.aioredis.FakeRedis()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    database = DatabaseStore(engine)
+    await database.create_tables()
+    shared: dict[str, Any] = (
+        {"redis_client": redis} if backend == "redis" else {"database_store": database}
+    )
+    main, main_app = _limited_app(get_session, UserModel, None, **shared)
+    admin, admin_app = _limited_app(get_session, UserModel, admin_prefix, **shared)
+    await main.initialize()
+    await admin.initialize()
+    await _user(sessionmaker, UserModel)
+
+    async with _client(main_app) as browser:
+        await _lock_out(browser)
+    async with _client(admin_app) as browser:
+        status = (await _login(browser)).status_code
+    await main.shutdown()
+    await admin.shutdown()
+    await redis.aclose()
+    await engine.dispose()
+
+    assert status == (429 if locked else 200)
+
+
+def test_redis_rate_limiter_takes_a_prefix() -> None:
+    limiter = redis_rate_limiter(client=fakeredis.aioredis.FakeRedis(), prefix="admin:rl:")
+
+    assert isinstance(limiter, RedisBackend)
+    assert limiter.prefix == "admin:rl:"
+
+
+def test_rate_limit_prefix_is_refused_beside_a_rate_limiter_of_your_own(
+    get_session: Any, UserModel: Any
+) -> None:
+    with pytest.raises(ValueError, match="rate_limit_prefix"):
+        CRUDAuth(
+            session=get_session,
+            user_model=UserModel,
+            SECRET_KEY=SECRET,
+            rate_limiter=MemoryRateLimiterBackend(),
+            rate_limit_prefix="admin:rl:",
+        )

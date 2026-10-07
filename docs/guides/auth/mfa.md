@@ -51,8 +51,14 @@ turn it on keep working until they end. With MFA unset, nothing about login chan
 
 ## Enrolling
 
-A signed-in user enrolls in two calls. Setup takes the password (for accounts that have one), so a
-stolen session can't attach an authenticator the owner doesn't have:
+A signed-in user enrolls in two calls. Setup takes the password, so a stolen session can't attach
+an authenticator the owner doesn't have. An account without a password (one that signs in only
+through OAuth) has nothing to re-enter, so it must have signed in within the last 10 minutes on
+the session making the request, or hold an active [sudo](sudo.md) elevation. Otherwise setup
+answers `403` with "Sign in again to continue", and your frontend sends the user back through
+the provider. `CRUDAuth(fresh_sign_in_seconds=...)` sets the window, and `0` closes the route to
+such accounts, leaving enrollment to your own code (`auth.mfa.begin_setup` / `confirm_setup`).
+A bearer token carries no sign-in time, so it's refused there:
 
 ```bash
 curl -X POST http://localhost:8000/mfa/totp/setup -b jar.txt \
@@ -170,6 +176,9 @@ the browser history, so read it and remove it right away
 (`history.replaceState(null, "", location.pathname + location.search)`). For a setup challenge that
 arrives this way, `POST /mfa/challenge` with `{"challenge"}` returns its `setup` details. The
 `/mfa/verify` response includes `redirect_to`, the landing path the OAuth login asked for.
+`on_oauth_login` runs when the callback resolves the account, before the challenge, and doesn't
+run again when the challenge is answered (see
+[Provider data on every sign-in](oauth.md#provider-data-on-every-sign-in)).
 
 ## Your own login route
 
@@ -190,6 +199,12 @@ if challenge is not None:
 ```
 
 `/mfa/verify` then finishes it through the named transport with those `options`.
+
+## Mounting the routes on their own
+
+`auth.router` includes the `/mfa` routes. An app that mounts CRUDAuth's routers one at a time
+(`auth.oauth_router`, `auth.session_router`, ...) mounts them with
+`app.include_router(auth.mfa_router)`, which raises `RuntimeError` when MFA isn't configured.
 
 ## Hooks
 

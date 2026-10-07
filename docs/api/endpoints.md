@@ -21,7 +21,7 @@ Present whenever `auth.router` is included, regardless of transports.
 |---|---|---|---|
 | POST | `/register` | none | Create an account. Strict field allowlist; `422` for a password that fails the [policy](../guides/accounts/passwords.md#password-policy) or a value longer than its column. ([Registration](../guides/accounts/registration.md)) |
 | GET | `/me` | any | The authenticated user's id, scopes, and transport. |
-| POST | `/set-password` | authenticated | First password for an OAuth-only account; `400` if one already exists, `422` if it fails the password policy. ([Passwords](../guides/accounts/passwords.md#setting-a-password-on-an-oauth-only-account)) |
+| POST | `/set-password` | authenticated, signed in within `fresh_sign_in_seconds` | First password for an OAuth-only account; `400` if one already exists, `403` if the session signed in too long ago (sign in again), `422` if it fails the password policy. ([Passwords](../guides/accounts/passwords.md#setting-a-password-on-an-oauth-only-account)) |
 | POST | `/change-password` | authenticated | Change a known password; `401` wrong current, `400` if unusable, `422` if the new one fails the password policy. Bumps `token_version`, revokes other sessions. ([Passwords](../guides/accounts/passwords.md#changing-a-known-password)) |
 
 ## Session transport
@@ -88,7 +88,7 @@ isn't enrolled) instead of a credential for accounts that use it. ([Two-factor a
 | POST | `/mfa/verify` | none | `{"challenge", "code"}` → the credential the login started (cookies or tokens), plus `recovery_codes` after enrollment. `401` wrong code, `400` bad challenge. |
 | POST | `/mfa/challenge` | none | `{"challenge"}` → `{"setup"}` details of a live setup challenge (for OAuth redirects). |
 | GET | `/mfa` | authenticated | `{"enabled", "required", "recovery_codes_remaining"}`. |
-| POST | `/mfa/totp/setup` | authenticated | `{"password"}` → `{"secret", "otpauth_uri"}`; `400` if already enabled. |
+| POST | `/mfa/totp/setup` | authenticated | `{"password"}` → `{"secret", "otpauth_uri"}`; `400` if already enabled. An account without a password sends `{}` and must have signed in within `fresh_sign_in_seconds` (`403` otherwise). |
 | POST | `/mfa/totp/confirm` | authenticated | `{"code"}` → `{"recovery_codes"}`, shown once. |
 | POST | `/mfa/totp/disable` | authenticated | `{"code"}` (authenticator or recovery); `403` when MFA is required. |
 | POST | `/mfa/recovery-codes/regenerate` | authenticated | `{"code"}` → new `{"recovery_codes"}`. |

@@ -12,7 +12,7 @@ from ..core import AuthRuntime
 from ..exceptions import BadRequestException, OAuthAccountException
 from ..hooks import HookContext
 from ..storage.base import AbstractSessionStorage
-from ..utils import safe_redirect_path
+from ..utils import get_client_ip, safe_redirect_path
 from .constants import ACCOUNT_INACTIVE, INVALID_STATE, OAUTH_FAILED, OAUTH_STATE_COOKIE_NAME
 from .provider import AbstractOAuthProvider, _require_httpx
 from .schemas import OAuthState
@@ -164,6 +164,10 @@ def build_oauth_router(
         """Handle the provider callback: verify state/PKCE, link-or-create the
         user, start a session, and redirect to the validated target.
 
+        Once the account is resolved and found active, ``on_oauth_login`` gets the
+        provider's profile and ``db``, before any MFA challenge and before the
+        session is created.
+
         Note:
             The ``state`` must match the browser-bound cookie set at
             ``authorize`` (login-CSRF / fixation defense), and is then consumed
@@ -216,8 +220,23 @@ def build_oauth_router(
                 db=db,
                 context=HookContext(transport="oauth", request=request),
             )
+            await runtime.repo.refresh_if_expired(db, user)
         if not runtime.repo.is_active(user):
             return _error_response(ACCOUNT_INACTIVE)
+
+        await runtime.hooks.run_oauth_login(
+            runtime.repo.to_dict(user),
+            info,
+            db=db,
+            created=created,
+            context=HookContext(
+                ip_address=get_client_ip(request, runtime.trusted_proxy_hops),
+                user_agent=request.headers.get("user-agent"),
+                transport="oauth",
+                request=request,
+            ),
+        )
+        await runtime.repo.refresh_if_expired(db, user)
 
         redirect_url = safe_redirect_path(state_data.redirect_to, default=default_redirect)
         if runtime.mfa is not None and runtime.mfa.config.oauth:

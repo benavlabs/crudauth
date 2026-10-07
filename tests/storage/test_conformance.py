@@ -12,16 +12,20 @@ import pytest
 from crudauth.storage.backends.memory import MemorySessionStorage
 from crudauth.storage.backends.redis import RedisSessionStorage
 from crudauth.transports.session.schemas import SessionData
+from tests.storage.conftest import DIALECTS
 
 
 def _fakeredis_client():
     return fakeredis.aioredis.FakeRedis()
 
 
-@pytest.fixture(params=["memory", "redis"])
-async def storage(request) -> AsyncIterator:
+@pytest.fixture(params=["memory", "redis", *DIALECTS])
+async def storage(request, engine_for) -> AsyncIterator:
     if request.param == "memory":
         yield MemorySessionStorage(prefix="t:", expiration=100)
+    elif request.param in DIALECTS:
+        _, database = await engine_for(request.param)
+        yield database.storage(prefix="t:", expiration=100)
     else:
         store: RedisSessionStorage[SessionData] = RedisSessionStorage(
             prefix="t:", expiration=100, client=_fakeredis_client()

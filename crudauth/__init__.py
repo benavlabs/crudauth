@@ -53,6 +53,7 @@ from .principal import Principal
 from .password import PasswordContext, PasswordPolicy
 from .provisioning import NewUserContext, NewUserFields
 from .repository import UserRepository
+from .storage import DatabaseStore
 from .sudo import SudoConfig, SudoManager
 from .transports import BearerTransport, SessionTransport
 from .transports.session.management import SessionInfo
@@ -78,6 +79,7 @@ __all__ = [
     "Principal",
     "SessionTransport",
     "BearerTransport",
+    "DatabaseStore",
     "OAuthCredentials",
     "EmailConfig",
     "EmailFlowResult",

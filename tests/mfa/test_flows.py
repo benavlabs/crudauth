@@ -31,6 +31,7 @@ from crudauth.mfa.recovery import hash_recovery_codes
 from crudauth.oauth import AbstractOAuthProvider, OAuthProviderFactory, OAuthUserInfo
 from crudauth.ratelimit import LockoutConfig
 from crudauth.storage.backends.memory import MemorySessionStorage
+from tests.conftest import mounted_paths
 
 from .conftest import (
     MFA_KEY,
@@ -502,7 +503,7 @@ def test_an_invalid_config_fails_at_construction(mfa_session, options: dict[str,
 
 def test_without_mfa_nothing_is_mounted(get_session, UserModel) -> None:
     auth = CRUDAuth(session=get_session, user_model=UserModel, SECRET_KEY=SECRET)
-    paths = {getattr(route, "path", "") for route in auth.router.routes}
+    paths = mounted_paths(auth.router)
 
     assert auth.mfa is None
     assert not any(path.startswith("/mfa") for path in paths)
@@ -573,6 +574,45 @@ async def test_oauth_logins_are_challenged_only_when_configured(
         me = await browser.get("/me")
     await auth.shutdown()
 
+    assert me.status_code == 200
+
+
+async def test_with_oauth_mfa_the_oauth_login_hook_runs_once_before_the_challenge(
+    build, monkeypatch, mfa_sessionmaker
+) -> None:
+    """The hook keeps provider data in step with the resolved account, so it runs when the
+    callback resolves it, not again when the challenge is answered."""
+    monkeypatch.setitem(OAuthProviderFactory._providers, "stub", _Provider)
+    runs: list[tuple[str, bool]] = []
+    hooks = AuthHooks(
+        on_oauth_login=lambda user, info, **kwargs: runs.append(
+            (info.provider_user_id, kwargs["created"])
+        )
+    )
+    auth, app, browser, secret, _ = await _enrolled_app(
+        build,
+        mfa=MfaConfig(issuer="Acme", encryption_key=MFA_KEY, oauth=True),
+        oauth={"stub": OAuthCredentials(client_id="id", client_secret="s")},
+        redirect_base_url="http://test",
+        hooks=hooks,
+    )
+    async with mfa_sessionmaker() as db:
+        user = await auth.repo.get_by_username(db, "alice")
+        await auth.repo.update(db, user, {"email_verified": True})
+    async with browser:
+        authorize = await browser.get("/oauth/stub/authorize")
+        state = parse_qs(urlparse(authorize.headers["location"]).query)["state"][0]
+        callback = await browser.get(f"/oauth/stub/callback?code=abc&state={state}")
+        token = callback.headers["location"].split("#mfa_challenge=")[1]
+        before = list(runs)
+        signed_in_before = (await browser.get("/me")).status_code
+        await browser.post("/mfa/verify", json={"challenge": token, "code": code_for(secret)})
+        me = await browser.get("/me")
+    await auth.shutdown()
+
+    assert before == [("idp-1", False)]
+    assert signed_in_before == 401
+    assert runs == [("idp-1", False)]
     assert me.status_code == 200
 
 

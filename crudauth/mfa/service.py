@@ -186,6 +186,7 @@ class MfaService:
                 await self.hooks.run_after_recovery_code_used(
                     self.repo.to_dict(user), db=db, context=context
                 )
+                await self.repo.refresh_if_expired(db, user)
                 return True
         return False
 

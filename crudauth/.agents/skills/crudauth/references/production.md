@@ -27,6 +27,18 @@ auth = CRUDAuth(..., redis_url=REDIS_URL)  # sessions, CSRF, tokens, OAuth state
 crudauth logs a startup warning naming each part still in memory. Pass
 `warn_on_memory_backend=False` only if you deliberately run a single worker.
 
+### Or your own database (no Redis)
+
+For several workers on PostgreSQL/MySQL/SQLite without Redis:
+`CRUDAuth(..., database_store=DatabaseStore(async_sessionmaker(engine, expire_on_commit=False)))`.
+Every store (sessions, CSRF, token/OAuth-state/MFA stores) and the default rate limiter move into
+two tables, `crudauth_store` and `crudauth_counters` (renamable). Lockout counters must be shared
+too, or N workers give N times the attempts, which is why one switch moves both. Create the tables
+with `await store.create_tables()` or in a migration (`DatabaseStore(..., metadata=Base.metadata)`
+lets Alembic autogenerate them). Every 1000 writes about as many expired rows are purged per table (`purge_every=`, `0`
+to call `store.purge_expired()` yourself); a failed purge is logged, never raised.
+Deadlocks (MySQL/MariaDB gap locks) are retried. MySQL needs 8.0.17+, MariaDB 10.2+. Not combinable with `redis_url`/`redis_client`.
+
 ## 2. Wire the lifespan
 
 Redis backends open connections on startup. `initialize()` / `shutdown()` are required for Redis,

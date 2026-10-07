@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel
 
 from ..protocols import AuthSurface
+from ..constants import FRESH_SIGN_IN_REQUIRED
 from ..exceptions import ForbiddenException, UnauthorizedException
 from ..hooks import HookContext
 from ..principal import Principal
@@ -91,13 +92,17 @@ def build_mfa_router(*, auth: AuthSurface, service: MfaService) -> APIRouter:
         """Start enrollment: returns a new ``secret`` and its ``otpauth_uri``.
 
         An account with a password must send it, so a stolen session can't enroll an
-        authenticator the owner doesn't have.
+        authenticator the owner doesn't have. An account without one (OAuth-only) must
+        have signed in within ``fresh_sign_in_seconds`` on this session, or hold sudo;
+        otherwise it gets a 403 and signs in again.
         """
         user = principal.user
         hashed_password = auth.repo.get(user, "hashed_password")
-        if not is_unusable_password(hashed_password) and not (
-            body.password is not None
-            and await verify_password_async(body.password, hashed_password)
+        if is_unusable_password(hashed_password):
+            if not await auth.signed_in_recently(principal):
+                raise ForbiddenException(FRESH_SIGN_IN_REQUIRED)
+        elif body.password is None or not await verify_password_async(
+            body.password, hashed_password
         ):
             raise UnauthorizedException("Incorrect password")
         return await service.begin_setup(db, user)

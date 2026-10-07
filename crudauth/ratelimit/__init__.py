@@ -10,13 +10,15 @@ from __future__ import annotations
 import importlib.util
 from typing import Any
 
-from .backends import MemoryRateLimiterBackend, RedisBackend
+from .backends import DatabaseRateLimiterBackend, MemoryRateLimiterBackend, RedisBackend
 from .base import RateLimiterBackend
 from .config import DEFAULT_RATE_LIMITS, KeyBy, LockoutConfig, RateLimit, RateLimitResolver
+from .constants import REDIS_KEY_PREFIX
 from .headers import RateLimitHeadersMiddleware
 from .policy import LockoutPolicy
 
 __all__ = [
+    "DatabaseRateLimiterBackend",
     "RateLimiterBackend",
     "MemoryRateLimiterBackend",
     "RedisBackend",
@@ -31,12 +33,17 @@ __all__ = [
 ]
 
 
-def redis_rate_limiter(redis_url: str | None = None, client: Any = None) -> RateLimiterBackend:
+def redis_rate_limiter(
+    redis_url: str | None = None, client: Any = None, prefix: str = REDIS_KEY_PREFIX
+) -> RateLimiterBackend:
     """Construct a Redis rate-limiter backend, guarding the optional dependency.
 
     Args:
         redis_url: Connection URL (defaults to localhost when omitted).
         client: A pre-built ``redis.asyncio`` client to reuse instead of a URL.
+        prefix: Put before every key (default ``"crudauth:rl:"``). Two apps sharing one
+            Redis (an admin panel beside the main app) need different ones, or a
+            username locked out in one is locked out of the other.
 
     Returns:
         A [RedisBackend][crudauth.ratelimit.backends.redis.RedisBackend].
@@ -53,4 +60,4 @@ def redis_rate_limiter(redis_url: str | None = None, client: Any = None) -> Rate
         raise ImportError(
             "Redis rate limiter requires redis. Install: pip install 'crudauth[redis]'"
         )
-    return RedisBackend(redis_url=redis_url, client=client)
+    return RedisBackend(redis_url=redis_url, client=client, prefix=prefix)

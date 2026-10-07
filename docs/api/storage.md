@@ -9,4 +9,8 @@ The server-side store for sessions, CSRF tokens, and one-time tokens. Pick a bac
 
 ::: crudauth.storage.RedisSessionStorage
 
+::: crudauth.storage.DatabaseStore
+
+::: crudauth.storage.DatabaseSessionStorage
+
 ::: crudauth.storage.get_session_storage

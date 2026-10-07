@@ -82,7 +82,12 @@ class Principal:
 - **App policy (welcome email, trial grant):** don't inline it in a route; register an `AuthHooks`
   callback (`on_after_register`, `on_after_login`, ...) so it fires uniformly across every path.
   Hooks run after the operation completes; an exception in one is logged (`crudauth.hooks`) and
-  doesn't fail the request.
+  doesn't fail the request. A hook handed `db` commits its own writes; if it raises, crudauth rolls
+  back what it left uncommitted.
+- **Fresh sign-in:** `await auth.signed_in_recently(principal)` is `True` when the session signed in
+  within `CRUDAuth(fresh_sign_in_seconds=600)` or holds sudo (always `False` for bearer, and with
+  `0`). `/set-password` and passwordless `/mfa/totp/setup` require it; use it to gate your own
+  routes that add a lasting credential to an account with no password.
 - **Per-user rate limit:** `auth.rate_limit(action, key=KeyBy.USER)` resolves the user via the same
   cached authentication, so it composes with `current_user` without a second lookup. Use
   `KeyBy.USER_OR_IP` to fall back to the client IP for anonymous callers, and pass a function of

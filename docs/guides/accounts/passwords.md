@@ -167,11 +167,16 @@ signing in and meet the new rules the next time they set a password.
 
 A user who signed up through OAuth has no usable password (the stored value is an unusable
 sentinel). `POST /set-password` is a built-in route that lets them set their first one while
-authenticated. The active session is the re-authentication, since there's no current password
-to check.
+authenticated. There's no current password to check, so the proof is a recent sign-in: the
+session making the request must have signed in within the last 10 minutes, or hold an active
+[sudo](../auth/sudo.md) elevation. Otherwise it answers `403` ("Sign in again to continue"), and
+your frontend sends the user back through the provider first. A password is a lasting credential,
+and email change and every other password-gated action follow from it, so an old or stolen
+session cookie isn't enough. `CRUDAuth(fresh_sign_in_seconds=...)` sets the window (`0` closes
+the route), and a bearer token, which carries no sign-in time, is refused.
 
 ```bash
-# 1. set the password (the OAuth session cookie + CSRF header authenticate the call)
+# 1. right after signing in through OAuth, set the password (the session cookie + CSRF header)
 curl -X POST http://localhost:8000/set-password \
   -H "X-CSRF-Token: <token>" -H "Content-Type: application/json" \
   -b "session_id=<cookie>" \

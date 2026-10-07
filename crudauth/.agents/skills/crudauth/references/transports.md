@@ -25,7 +25,13 @@ session cookie. Sessions and CSRF follow `CRUDAuth(redis_url=...)` / `CRUDAuth(r
   sign-in.
 - Two apps on CRUDAuth side by side (an admin panel beside the main app) each need their own
   `cookie_name`, `csrf_cookie_name`, `storage_prefix` and `csrf_storage_prefix`, or one's session
-  resolves in the other on a shared Redis.
+  resolves in the other on a shared Redis. Their lockout counters too: `CRUDAuth(rate_limit_prefix=...)`
+  (or `prefix=` on `redis_rate_limiter` / `store.rate_limiter`), or failures in one lock the same
+  username out of the other.
+- A logout route of your own: `await session_transport.complete_logout(request, response, db)` ends
+  the session, clears the cookies and runs `on_after_logout` (CSRF header required on a live session).
+- `backend="database"` (or just `CRUDAuth(database_store=...)`) keeps sessions and CSRF tokens in
+  the database.
 - `storage=` / `csrf_storage=` take stores you built (any `AbstractSessionStorage`), instead of
   memory or Redis; not combinable with `backend`, `redis_url`, `redis_client` or `storage_prefix`.
 

@@ -26,7 +26,8 @@ What you get off `auth`:
 | `auth.sessions` | the [`SessionManager`](../api/transports.md#sessionmanager): `create_session`, `revoke`, `revoke_all`, CSRF, lockout |
 | `auth.sudo` | the [`SudoManager`](../api/sudo.md): `elevate`, `is_elevated` |
 | `auth.emails` | the [`EmailFlowService`](../api/email.md) (or `None`): `request_password_reset`, `reset_password`, ... The confirm methods return `EmailFlowResult(user, redirect_to)`. |
-| `auth.oauth` | the [`OAuthAccountService`](../api/oauth.md) (or `None`): `get_or_create_user` |
+| `auth.oauth` | the [`OAuthAccountService`](../api/oauth.md) (or `None`): `get_or_create_user`; a hand-written callback then runs `auth.hooks.run_oauth_login(...)` ([OAuth](../guides/auth/oauth.md#provider-data-on-every-sign-in)) |
+| `auth.signed_in_recently(principal)` | whether the session signed in within `fresh_sign_in_seconds` (or holds sudo), for gating your own routes on a fresh sign-in |
 | `auth.current_user(...)` | the gate dependency — works on *your* routes |
 | `auth.rate_limit(...)` / `auth.require_sudo()` | the other dependencies |
 

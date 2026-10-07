@@ -23,7 +23,7 @@ from ...ratelimit.config import LockoutConfig, LoginSuccessClears
 from ...storage import get_session_storage
 from ...storage.base import AbstractSessionStorage
 from ...storage.backends.redis import redis_client_from_url
-from ...storage.constants import BACKEND_CUSTOM, BACKEND_MEMORY, BACKEND_REDIS
+from ...storage.constants import BACKEND_CUSTOM, BACKEND_DATABASE, BACKEND_MEMORY, BACKEND_REDIS
 from ...utils import get_client_ip
 from .constants import (
     CSRF_COOKIE_NAME,
@@ -50,9 +50,10 @@ class SessionTransport(Transport):
     ``SameSite=None`` (rejected at construction).
 
     Args:
-        backend: Where sessions and CSRF tokens live, ``"memory"`` or ``"redis"``. Left
-            unset, it's Redis when this transport or [CRUDAuth][crudauth.crud_auth.CRUDAuth]
-            has a ``redis_url`` or ``redis_client``, and memory otherwise.
+        backend: Where sessions and CSRF tokens live, ``"memory"``, ``"redis"`` or
+            ``"database"``. Left unset, it's Redis when this transport or
+            [CRUDAuth][crudauth.crud_auth.CRUDAuth] has a ``redis_url`` or ``redis_client``,
+            the database when ``CRUDAuth`` has a ``database_store``, and memory otherwise.
         redis_url: Redis URL for this transport's sessions and CSRF tokens, overriding
             ``CRUDAuth``'s. The transport opens one client for it and closes it on shutdown.
         redis_client: Existing async Redis client for this transport, overriding
@@ -152,8 +153,12 @@ class SessionTransport(Transport):
         elif csrf_storage is not None:
             raise ValueError("csrf_storage is only used together with storage")
         backend = backend.lower() if backend else None
-        if backend == BACKEND_MEMORY and (redis_url is not None or redis_client is not None):
-            raise ValueError("backend='memory' can't be combined with redis_url or redis_client")
+        if backend in (BACKEND_MEMORY, BACKEND_DATABASE) and (
+            redis_url is not None or redis_client is not None
+        ):
+            raise ValueError(
+                f"backend={backend!r} can't be combined with redis_url or redis_client"
+            )
         self._backend = backend
         self._redis_url = redis_url
         self._redis_client = redis_client
@@ -219,9 +224,18 @@ class SessionTransport(Transport):
         client = self._redis_client
         if client is None and self._redis_url is not None:
             client = self._owned_client = redis_client_from_url(self._redis_url)
-        elif client is None and self._backend != BACKEND_MEMORY:
+        elif client is None and self._backend not in (BACKEND_MEMORY, BACKEND_DATABASE):
             client = runtime.redis_client
-        backend = self._backend or (BACKEND_REDIS if client is not None else BACKEND_MEMORY)
+        database = runtime.database_store if client is None else None
+        if self._backend == BACKEND_DATABASE and database is None:
+            raise ValueError("backend='database' needs CRUDAuth(database_store=...)")
+        backend = self._backend or (
+            BACKEND_REDIS
+            if client is not None
+            else BACKEND_DATABASE
+            if database is not None
+            else BACKEND_MEMORY
+        )
         if backend == BACKEND_REDIS and client is None:
             client = self._owned_client = redis_client_from_url()
         self.backend, self.redis_client = backend, client
@@ -230,6 +244,7 @@ class SessionTransport(Transport):
             prefix=self.storage_prefix,
             expiration=timeout_seconds,
             client=self.redis_client,
+            database=database,
         )
         csrf_storage: AbstractSessionStorage[CSRFToken] | None = None
         if self.csrf_enabled:
@@ -238,6 +253,7 @@ class SessionTransport(Transport):
                 prefix=self.csrf_storage_prefix,
                 expiration=timeout_seconds,
                 client=self.redis_client,
+                database=database,
             )
         self.manager = self._build_manager(runtime, cookies, session_storage, csrf_storage)
 
@@ -392,6 +408,62 @@ class SessionTransport(Transport):
             "username": runtime.repo.get(user, "username"),
             "csrf_token": csrf,
         }
+
+    async def complete_logout(self, request: Request, response: Response, db: Any) -> bool:
+        """End the session the request's cookie names, clear the cookies, and fire ``on_after_logout``.
+
+        What ``/logout`` does, for an app with a logout route of its own (an HTML form,
+        say). A live session must pass the CSRF check first, so the request needs the
+        ``X-CSRF-Token`` header; one that already expired has nothing left to protect,
+        so its cookies are cleared without it. Every configured transport's cookies are
+        cleared, a bearer refresh cookie included. The hook gets the account and a
+        context naming the session that ended by its ``session_handle``.
+
+        Returns:
+            ``True`` if a session was ended, ``False`` if there was none to end.
+
+        Raises:
+            CSRFException: A live session without a valid CSRF token.
+
+        Example:
+            ```python
+            @app.post("/admin/logout")
+            async def admin_logout(request: Request, db=Depends(get_db)):
+                response = RedirectResponse("/admin/login", status_code=303)
+                await session_transport.complete_logout(request, response, db)
+                return response
+            ```
+        """
+        assert self.manager is not None
+        runtime = self.runtime
+        session_id = request.cookies.get(self.manager.session_cookie_name)
+        session = (
+            await self.manager.validate_session(session_id, update_activity=False)
+            if session_id
+            else None
+        )
+        user_dict = None
+        ended = False
+        if session_id and session is not None:
+            await self.enforce_csrf(request, session_id)
+            user = await runtime.repo.get_by_id(db, session.user_id)
+            if user is not None:
+                user_dict = runtime.repo.to_dict(user)
+            ended = await self.manager.terminate_session(session_id, reason="logout")
+        runtime.clear_cookies(response)
+        if user_dict is not None and session_id:
+            await runtime.hooks.run_after_logout(
+                user_dict,
+                request=request,
+                context=HookContext(
+                    ip_address=get_client_ip(request, runtime.trusted_proxy_hops),
+                    user_agent=request.headers.get("user-agent"),
+                    transport=self.name,
+                    request=request,
+                    session_handle=self.manager.session_handle(session_id),
+                ),
+            )
+        return ended
 
     def clear_cookies(self, response: Response) -> None:
         """Expire the session and CSRF cookies."""

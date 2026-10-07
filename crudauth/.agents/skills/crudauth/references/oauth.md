@@ -110,9 +110,23 @@ auth = CRUDAuth(..., new_user_defaults={"tier": "free"},
 
 ## Password for an OAuth-only account
 
-An OAuth-created user has no usable password. `POST /set-password` lets an authenticated OAuth-only
-account set a first password; alternatively the password-reset flow doubles as "set a password". After
-that, both doors work.
+An OAuth-created user has no usable password. `POST /set-password` lets an OAuth-only account set a
+first password, from a session signed in within `CRUDAuth(fresh_sign_in_seconds=600)` (or holding
+sudo); an older session gets `403` and must sign in through the provider again, and a bearer token
+is refused. Alternatively the password-reset flow doubles as "set a password". After that, both
+doors work.
+
+## Provider data on every sign-in
+
+`AuthHooks(on_oauth_login=fn)`, called as `fn(user, info, *, db, created, context)` on every OAuth
+sign-in that reaches an active account (created, linked by email, or found by provider id), after
+the disabled-account check and before any MFA challenge and the session. `info` is the normalized
+`OAuthUserInfo` (`info.username` = GitHub login, `info.raw_data` = provider payload). Use it for
+provider data that changes (a GitHub login changes on rename; crudauth's derived `username` is
+sanitized and set once). Best-effort: it can't refuse the sign-in; an exception is logged and its
+uncommitted work rolled back. The hook commits its own writes. A hand-written callback using
+`auth.oauth.get_or_create_user` calls `await auth.hooks.run_oauth_login(...)` itself, then
+`await auth.repo.refresh_if_expired(db, user)`.
 
 ## Custom provider
 

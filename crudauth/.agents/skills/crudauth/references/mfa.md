@@ -50,13 +50,15 @@ Startup raises if a column is missing (map with `column_map=`), the key isn't a 
 | Route | Body | Result |
 |---|---|---|
 | `GET /mfa` | | `{"enabled", "required", "recovery_codes_remaining"}` |
-| `POST /mfa/totp/setup` | `{"password"}` (if the account has one) | `{"secret", "otpauth_uri"}` |
+| `POST /mfa/totp/setup` | `{"password"}`; `{}` for an account without one, which must have signed in within `fresh_sign_in_seconds` (default 600) or hold sudo, else `403` | `{"secret", "otpauth_uri"}` |
 | `POST /mfa/totp/confirm` | `{"code"}` | `{"recovery_codes"}` (shown once) |
 | `POST /mfa/totp/disable` | `{"code"}` (TOTP or recovery) | `403` when required |
 | `POST /mfa/recovery-codes/regenerate` | `{"code"}` | new `{"recovery_codes"}` |
 
 Admin reset without a code: `await auth.mfa.disable(db, user)`. Sudo with a code:
-`await auth.sudo.elevate(principal, code=..., db=db, request=request)`.
+`await auth.sudo.elevate(principal, code=..., db=db, request=request)`. Mount only these routes with
+`app.include_router(auth.mfa_router)` (raises `RuntimeError` without MFA). With `MfaConfig(oauth=True)`,
+`on_oauth_login` runs once, before the challenge.
 
 Hooks: `on_after_mfa_enabled`, `on_after_mfa_disabled`, `on_after_recovery_code_used` (`user, db, context`).
 The TOTP secret and recovery-code hashes are never in the hook `user` dict. Secrets are Fernet-encrypted

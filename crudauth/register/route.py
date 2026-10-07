@@ -219,6 +219,7 @@ def build_register_route(auth: AuthSurface, schema: type[BaseModel] | None) -> A
                 request=request,
             ),
         )
+        await auth.repo.refresh_if_expired(db, user)
 
         if emails is not None and auth.identity.recovery is not None:
             await _send_best_effort(

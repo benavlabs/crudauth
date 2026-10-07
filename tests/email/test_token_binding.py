@@ -18,6 +18,7 @@ from crudauth import (
     SessionTransport,
 )
 from crudauth.repository import UserRepository
+from tests.conftest import mounted_paths
 
 SECRET = "test-secret-key-0123456789-0123456789"
 PASSWORD = "pw123456"
@@ -229,7 +230,7 @@ def test_change_email_routes_need_a_channel_that_emails_the_recipient(
         transports=[SessionTransport(cookies=CookieConfig(secure=False))],
         channels=[RecordingChannel()],
     )
-    paths = {getattr(route, "path", "") for route in auth.router.routes}
+    paths = mounted_paths(auth.router)
 
     assert "/password/reset-request" in paths
     assert "/email/change-request" not in paths
